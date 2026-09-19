@@ -1,0 +1,26 @@
+# Racket bytecode and dependency cache directories
+compiled/
+**/compiled/
+*.zo
+*.dep
+
+# Racket documentation and package builds
+doc/
+*.pkgl
+
+# Editor and IDE configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+#*#
+.#*
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
