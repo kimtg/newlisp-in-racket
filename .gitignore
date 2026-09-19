@@ -4,9 +4,10 @@ compiled/
 *.zo
 *.dep
 
-# Racket documentation and package builds
+# Racket documentation, packages, and standalone executables
 doc/
 *.pkgl
+*.exe
 
 # Editor and IDE configurations
 .vscode/

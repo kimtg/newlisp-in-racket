@@ -71,6 +71,27 @@ Scripts can access command-line arguments using `(main-args)` and `$args`:
 racket main.rkt demo.lsp foo bar
 ```
 
+### Creating a Standalone Executable
+You can compile the interpreter and runtime into a standalone native binary with all required dependencies embedded using `raco exe --embed-dlls`:
+
+```bash
+# Compile standalone executable embedding runtime DLLs (Windows)
+raco exe --embed-dlls -o newlisp.exe main.rkt
+```
+
+The resulting `newlisp.exe` is self-contained and runs without needing Racket installed:
+
+```bash
+# Launch the interactive REPL
+./newlisp.exe
+
+# Evaluate an expression directly
+./newlisp.exe -e "(println (+ 1 2 3))"
+
+# Run a script with arguments
+./newlisp.exe demo.lsp foo bar
+```
+
 ---
 
 ## Code Examples
