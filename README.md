@@ -20,6 +20,7 @@ This project implements the semantics of newLISP v10.7+—including dynamic scop
   - **Default Functors & Tree Dictionaries**: Contexts callable as associative lookups and mutating stores: `(PhoneBook "Alice" "555-0101")`.
   - **Implicit Slicing & Indexing**: Indexing expressions like `(lst 0)`, `(lst -1)`, slices like `(start count lst)`, and string slices.
   - **Place Mutation**: In-place mutation primitives including `++`, `--`, `swap`, `push`, `pop`, and `setf` on collections and strings.
+  - **Comprehensive Control Flow**: `if`, `if-not`, `cond`, `case`, `while`, `until`, `do-while`, `do-until`, `dotimes`, `dolist`, `dostring`, `for`, `catch`, and `throw`.
 - **Extensive Standard Library**:
   - **File I/O**: `read-file`, `write-file`, `append-file`, `copy-file`, `delete-file`, `directory`, `change-dir`.
   - **HTTP Client**: `get-url` supporting query headers, status codes, timeouts, and `file://` URIs.
@@ -69,6 +70,19 @@ racket main.rkt demo.lsp
 Scripts can access command-line arguments using `(main-args)` and `$args`:
 ```bash
 racket main.rkt demo.lsp foo bar
+```
+
+### Running with `#lang newlisp`
+You can write standalone source files with `#lang newlisp` (or `#lang reader "newlisp/lang/reader.rkt"`) and execute them directly with Racket:
+```lisp
+#lang newlisp
+(define (fib n)
+  (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+(println "Fib 20: " (fib 20))
+(println "Args: " (main-args))
+```
+```bash
+racket -S . my_script.lsp foo bar
 ```
 
 ### Creating a Standalone Executable
@@ -152,7 +166,7 @@ The resulting `newlisp.exe` is self-contained and runs without needing Racket in
 ## Architecture & Codebase Layout
 
 ```
-oldlisp/
+newlisp-in-racket/
 ├── main.rkt                   # CLI driver & entry point (-e, REPL, script execution)
 ├── nl-types.rkt               # Core data types, symbols, contexts, and environment
 ├── nl-reader.rkt              # Tokenizer and reader (strings, numbers, symbols, lists)
@@ -160,18 +174,20 @@ oldlisp/
 ├── nl-transpile.rkt           # Optimizing transpiler to native Racket syntax
 ├── nl-builtins.rkt            # Core built-in primitives and control flow
 ├── nl-ext.rkt                 # Extended utility functions
-├── nl-macros.rkt              # Built-in and user-defined macros
+├── nl-macros.rkt              # Built-in macros & syntax transformers
 ├── nl-files.rkt               # File system primitives
 ├── nl-net.rkt                 # TCP socket networking
 ├── nl-math-ext.rkt            # Linear algebra, statistical, and financial functions
 ├── nl-http.rkt                # HTTP client (get-url)
 ├── nl-repl.rkt                # Multi-line interactive REPL
 ├── newlisp/
+│   ├── main.rkt               # Package re-exports for collection usage
 │   └── lang/
 │       └── reader.rkt         # `#lang newlisp` reader module for Racket integration
 ├── tests/
-│   ├── test-all.rkt           # Unit test suite for interpreter (90 tests)
-│   └── test-compiled.rkt      # Unit test suite for transpiler (90 tests)
+│   ├── test-all.rkt           # Unit test suite for interpreter (96 tests)
+│   ├── test-compiled.rkt      # Unit test suite for transpiler (96 tests)
+│   └── test-cli.rkt           # CLI, option flags, and subprocess test suite (30 tests)
 ├── benchmarks/
 │   └── bench-compare.rkt      # Benchmark comparing interpreted vs transpiled performance
 ├── demo.lsp                   # Feature demonstration script
@@ -182,7 +198,7 @@ oldlisp/
 
 ## Performance & Benchmarks
 
-The transpiler (`nl-transpile.rkt`) compiles newLISP ASTs into Racket constructs, utilizing unboxed operations, direct identifier bindings, and place mutations where possible.
+The transpiler (`nl-transpile.rkt`) compiles newLISP ASTs into Racket constructs, utilizing unboxed operations, direct identifier bindings, optimized place mutations, and native Racket higher-order dispatch.
 
 Run the benchmark suite:
 ```bash
@@ -193,26 +209,29 @@ racket benchmarks/bench-compare.rkt
 
 | Benchmark | Interpreted | Transpiled | Speedup |
 | :--- | :--- | :--- | :--- |
-| **Recursive Fibonacci** (`fib 30`) | `2926 ms` | `141 ms` | **20.7x faster** |
-| **Tight Loop Mutation** (`dotimes 1,000,000` with `++`) | `847 ms` | `6.9 ms` | **122.3x faster** |
-| **List Operations** (`sequence`, `map`, `filter` 100,000 items) | `143 ms` | `149 ms` | **~1.0x** |
-| **FOOP Method Dispatch** (100,000 invocations) | `462 ms` | `476 ms` | **~1.0x** |
+| **Recursive Fibonacci** (`fib 30`) | `2854 ms` | `137 ms` | **20.8x faster** |
+| **Tight Loop Mutation** (`dotimes 1,000,000` with `++`) | `901 ms` | `6.5 ms` | **139.6x faster** |
+| **List Operations** (`sequence`, `map`, `filter` 100,000 items) | `142 ms` | `17.3 ms` | **8.2x faster** |
+| **FOOP Method Dispatch** (100,000 invocations) | `425 ms` | `77.6 ms` | **5.5x faster** |
 
 ---
 
 ## Verification & Testing
 
-The test suite covers arithmetic, string handling, dynamic scoping, FOOP dispatch, place mutation, networking, HTTP requests, binary packing, and matrices.
+The test suite covers arithmetic, string handling, dynamic scoping, FOOP dispatch, place mutation, networking, HTTP requests, binary packing, matrices, and command-line interfaces.
 
 ```bash
-# Run interpreter test suite
+# Run interpreter test suite (96 tests)
 racket tests/test-all.rkt
 
-# Run transpiled / compiled test suite
+# Run transpiled / compiled test suite (96 tests)
 racket tests/test-compiled.rkt
+
+# Run CLI and flags test suite (30 tests)
+racket tests/test-cli.rkt
 ```
 
-Both test suites validate 90 individual test assertions across the entire feature set.
+All 222 tests pass across the entire test suite.
 
 ---
 

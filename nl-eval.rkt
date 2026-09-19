@@ -162,6 +162,10 @@
        [(and sf-name (string=? sf-name "if"))
         (eval-if raw-args)]
 
+       ;; Special Form: if-not
+       [(and sf-name (string=? sf-name "if-not"))
+        (eval-if-not raw-args)]
+
        ;; Special Form: when
        [(and sf-name (string=? sf-name "when"))
         (if (null? raw-args)
@@ -360,7 +364,9 @@
     ;; 2. Lambda function (evaluates arguments, dynamically binds parameters)
     [(and (nl-lambda? functor) (not (nl-lambda-is-macro? functor)))
      (define evaluated-args (map nl-eval raw-args))
-     (apply-lambda functor evaluated-args)]
+     (if (nl-lambda-compiled-proc functor)
+         (apply (nl-lambda-compiled-proc functor) evaluated-args)
+         (apply-lambda functor evaluated-args))]
 
     ;; 3. Lambda-macro / Fexpr (unevaluated arguments passed directly)
     [(and (nl-lambda? functor) (nl-lambda-is-macro? functor))
@@ -402,7 +408,9 @@
     [(nl-primitive? functor)
      ((nl-primitive-proc functor) nl-eval actual-args (current-context))]
     [(nl-lambda? functor)
-     (apply-lambda functor actual-args)]
+     (if (nl-lambda-compiled-proc functor)
+         (apply (nl-lambda-compiled-proc functor) actual-args)
+         (apply-lambda functor actual-args))]
     [(nl-context? functor)
      (apply-context-functor functor (map (lambda (a) (list 'quote a)) actual-args))]
     [(pair? functor)
@@ -885,6 +893,30 @@
           (define cond-val (nl-eval (car rem)))
           (set-symbol-val! sym-it cond-val)
           (if (nl-truthy? cond-val)
+              (nl-eval (cadr rem))
+              (loop (cddr rem)))]))]))
+
+(define (eval-if-not args)
+  (cond
+    [(null? args) nl-nil]
+    [(<= (length args) 3)
+     (define cond-val (nl-eval (car args)))
+     (set-symbol-val! sym-it cond-val)
+     (if (not (nl-truthy? cond-val))
+         (if (pair? (cdr args)) (nl-eval (cadr args)) cond-val)
+         (if (and (pair? (cdr args)) (pair? (cddr args)))
+             (nl-eval (caddr args))
+             nl-nil))]
+    [else
+     (let loop ([rem args])
+       (cond
+         [(null? rem) nl-nil]
+         [(= (length rem) 1)
+          (nl-eval (car rem))]
+         [else
+          (define cond-val (nl-eval (car rem)))
+          (set-symbol-val! sym-it cond-val)
+          (if (not (nl-truthy? cond-val))
               (nl-eval (cadr rem))
               (loop (cddr rem)))]))]))
 

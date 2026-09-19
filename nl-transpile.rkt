@@ -109,6 +109,10 @@
     [(and op-name (string=? op-name "if"))
      (transpile-if args ctx)]
 
+    ;; if-not
+    [(and op-name (string=? op-name "if-not"))
+     (transpile-if-not args ctx)]
+
     ;; when
     [(and op-name (string=? op-name "when"))
      (if (null? args)
@@ -274,11 +278,11 @@
 
     ;; for
     [(and op-name (string=? op-name "for"))
-     #`(eval-for '#,args)]
+     (transpile-for args ctx)]
 
     ;; dostring
     [(and op-name (string=? op-name "dostring"))
-     #`(eval-dostring '#,args)]
+     (transpile-dostring args ctx)]
 
     ;; dotree
     [(and op-name (string=? op-name "dotree"))
@@ -286,11 +290,17 @@
 
     ;; do-while
     [(and op-name (string=? op-name "do-while"))
-     #`(eval-do-while '#,args)]
+     (if (null? args)
+         #'nl-nil
+         #`(nl-do-while #,(transpile-expr (car args) ctx)
+             #,@(for/list ([e (cdr args)]) (transpile-expr e ctx))))]
 
     ;; do-until
     [(and op-name (string=? op-name "do-until"))
-     #`(eval-do-until '#,args)]
+     (if (null? args)
+         #'nl-nil
+         #`(nl-do-until #,(transpile-expr (car args) ctx)
+             #,@(for/list ([e (cdr args)]) (transpile-expr e ctx))))]
 
     ;; curry
     [(and op-name (string=? op-name "curry"))
@@ -326,6 +336,31 @@
     [(and op-name (string=? op-name "!="))
      (transpile-cmp 'nl-fast-!= args ctx)]
 
+    ;; Fast Collection Operations (map, filter, clean, length, sequence)
+    [(and op-name (string=? op-name "map") (pair? args))
+     #`(nl-fast-map #,(transpile-expr (car args) ctx)
+                    #,@(for/list ([a (cdr args)]) (transpile-expr a ctx)))]
+
+    [(and op-name (string=? op-name "filter") (= (length args) 2))
+     #`(nl-fast-filter #,(transpile-expr (car args) ctx)
+                       #,(transpile-expr (cadr args) ctx))]
+
+    [(and op-name (string=? op-name "clean") (= (length args) 2))
+     #`(nl-fast-clean #,(transpile-expr (car args) ctx)
+                      #,(transpile-expr (cadr args) ctx))]
+
+    [(and op-name (string=? op-name "length") (= (length args) 1))
+     #`(nl-fast-length #,(transpile-expr (car args) ctx))]
+
+    [(and op-name (string=? op-name "sequence") (or (= (length args) 2) (= (length args) 3)))
+     #`(nl-fast-sequence #,(transpile-expr (car args) ctx)
+                         #,(transpile-expr (cadr args) ctx)
+                         #,@(if (= (length args) 3) (list (transpile-expr (caddr args) ctx)) '()))]
+
+    ;; self access: (self) or (self idx ...)
+    [(and op-name (string=? op-name "self"))
+     #`(nl-self-ref #,@(for/list ([a args]) (transpile-expr a ctx)))]
+
     ;; FOOP method call: (:method target arg1 ...) or (: method target arg1 ...)
     [(or (and op-name (string-prefix? op-name ":") (not (string=? op-name ":")))
          (and op-name (string=? op-name ":")))
@@ -360,6 +395,29 @@
           #`(let ([it #,(transpile-expr (car rem) ctx)])
               (set-nl-symbol-value! sym-it it)
               (if (nl-truthy? it)
+                  #,(transpile-expr (cadr rem) ctx)
+                  #,(loop (cddr rem))))]))]))
+
+(define (transpile-if-not args ctx)
+  (cond
+    [(null? args) #'nl-nil]
+    [(= (length args) 1) (transpile-expr (car args) ctx)]
+    [(= (length args) 2)
+     #`(nl-if-not #,(transpile-expr (car args) ctx)
+                  #,(transpile-expr (cadr args) ctx))]
+    [(= (length args) 3)
+     #`(nl-if-not #,(transpile-expr (car args) ctx)
+                  #,(transpile-expr (cadr args) ctx)
+                  #,(transpile-expr (caddr args) ctx))]
+    [else
+     (let loop ([rem args])
+       (cond
+         [(null? rem) #'nl-nil]
+         [(= (length rem) 1) (transpile-expr (car rem) ctx)]
+         [else
+          #`(let ([it #,(transpile-expr (car rem) ctx)])
+              (set-nl-symbol-value! sym-it it)
+              (if (not (nl-truthy? it))
                   #,(transpile-expr (cadr rem) ctx)
                   #,(loop (cddr rem))))]))]))
 
@@ -410,6 +468,32 @@
       #`(nl-dolist (#,var-sym #,list-expr #,break-cond) #,@body-exprs)
       #`(nl-dolist (#,var-sym #,list-expr) #,@body-exprs)))
 
+(define (transpile-for args ctx)
+  (define header (car args))
+  (define var-sym (resolve-symbol-in-context (car header) ctx))
+  (define from-expr (transpile-expr (cadr header) ctx))
+  (define to-expr (transpile-expr (caddr header) ctx))
+  (define step-expr (if (pair? (cdddr header)) (transpile-expr (cadddr header) ctx) #f))
+  (define break-cond (if (and (pair? (cdddr header)) (pair? (cddddr header))) (transpile-expr (car (cddddr header)) ctx) #f))
+  (define body-exprs (for/list ([e (cdr args)]) (transpile-expr e ctx)))
+  (cond
+    [break-cond
+     #`(nl-for (#,var-sym #,from-expr #,to-expr #,(or step-expr #'(if (> #,to-expr #,from-expr) 1 -1)) #,break-cond) #,@body-exprs)]
+    [step-expr
+     #`(nl-for (#,var-sym #,from-expr #,to-expr #,step-expr) #,@body-exprs)]
+    [else
+     #`(nl-for (#,var-sym #,from-expr #,to-expr) #,@body-exprs)]))
+
+(define (transpile-dostring args ctx)
+  (define header (car args))
+  (define var-sym (resolve-symbol-in-context (car header) ctx))
+  (define str-expr (transpile-expr (cadr header) ctx))
+  (define break-cond (if (pair? (cddr header)) (transpile-expr (caddr header) ctx) #f))
+  (define body-exprs (for/list ([e (cdr args)]) (transpile-expr e ctx)))
+  (if break-cond
+      #`(nl-dostring (#,var-sym #,str-expr #,break-cond) #,@body-exprs)
+      #`(nl-dostring (#,var-sym #,str-expr) #,@body-exprs)))
+
 (define (transpile-setq args ctx)
   (let loop ([pairs args] [accum '()])
     (if (null? pairs)
@@ -445,22 +529,42 @@
       #'nl-nil
       (let ([place (car args)]
             [val (if (pair? (cdr args)) (cadr args) nl-nil)])
-        (if (nl-symbol? place)
-            (let ([var-sym (resolve-symbol-in-context place ctx)])
-              #`(nl-setq #,var-sym #,(transpile-expr val ctx)))
-            #`(mutate-place! '#,place #,(transpile-expr val ctx))))))
+        (cond
+          [(nl-symbol? place)
+           (let ([var-sym (resolve-symbol-in-context place ctx)])
+             #`(nl-setq #,var-sym #,(transpile-expr val ctx)))]
+          ;; (self idx ...)
+          [(and (pair? place)
+                (nl-symbol? (car place))
+                (string=? (nl-symbol-name (car place)) "self")
+                (pair? (cdr place)))
+           (define idx-expr (transpile-expr (cadr place) ctx))
+           #`(nl-self-setf! #,idx-expr #,(transpile-expr val ctx))]
+          [else
+           #`(mutate-place! '#,place #,(transpile-expr val ctx))]))))
 
 (define (transpile-inc-dec op args ctx)
   (define place (car args))
   (define delta (if (pair? (cdr args)) (transpile-expr (cadr args) ctx) #f))
-  (if (nl-symbol? place)
-      (let ([var-sym (resolve-symbol-in-context place ctx)])
-        (case op
-          [(++) (if delta #`(nl-++ #,var-sym #,delta) #`(nl-++ #,var-sym))]
-          [(--) (if delta #`(nl--- #,var-sym #,delta) #`(nl--- #,var-sym))]
-          [(inc) (if delta #`(nl-inc #,var-sym #,delta) #`(nl-inc #,var-sym))]
-          [(dec) (if delta #`(nl-dec #,var-sym #,delta) #`(nl-dec #,var-sym))]))
-      #`(nl-eval (list (find-or-create-symbol (~a '#,op) main-context) '#,place #,@(if delta (list delta) '())))))
+  (cond
+    [(nl-symbol? place)
+     (let ([var-sym (resolve-symbol-in-context place ctx)])
+       (case op
+         [(++) (if delta #`(nl-++ #,var-sym #,delta) #`(nl-++ #,var-sym))]
+         [(--) (if delta #`(nl--- #,var-sym #,delta) #`(nl--- #,var-sym))]
+         [(inc) (if delta #`(nl-inc #,var-sym #,delta) #`(nl-inc #,var-sym))]
+         [(dec) (if delta #`(nl-dec #,var-sym #,delta) #`(nl-dec #,var-sym))]))]
+
+    ;; (self idx ...)
+    [(and (pair? place)
+          (nl-symbol? (car place))
+          (string=? (nl-symbol-name (car place)) "self")
+          (pair? (cdr place)))
+     (define idx-expr (transpile-expr (cadr place) ctx))
+     #`(nl-self-inc-dec! '#,op #,idx-expr #,@(if delta (list delta) '()))]
+
+    [else
+     #`(nl-eval (list (find-or-create-symbol (~a '#,op) main-context) '#,place #,@(if delta (list delta) '())))]))
 
 (define (transpile-define args ctx is-macro?)
   (if (null? args)
@@ -686,10 +790,16 @@
         (values op (car args) (cdr args))))
   (define method-str (if (nl-symbol? method-sym) (nl-symbol-name method-sym) (~a method-sym)))
   (define clean-name (if (string-prefix? method-str ":") (substring method-str 1) method-str))
-  #`(nl-foop-dispatch '#,clean-name
-                      '#,target-expr
-                      #,(transpile-expr target-expr ctx)
-                      (list #,@(for/list ([a rest-args]) (transpile-expr a ctx)))))
+  (if (nl-symbol? target-expr)
+      (let ([var-sym (resolve-symbol-in-context target-expr ctx)])
+        #`(nl-foop-dispatch '#,clean-name
+                            #,var-sym
+                            (nl-symbol-value #,var-sym)
+                            (list #,@(for/list ([a rest-args]) (transpile-expr a ctx)))))
+      #`(nl-foop-dispatch '#,clean-name
+                          '#,target-expr
+                          #,(transpile-expr target-expr ctx)
+                          (list #,@(for/list ([a rest-args]) (transpile-expr a ctx))))))
 
 (define (transpile-general-app op args ctx)
   (if (nl-symbol? op)

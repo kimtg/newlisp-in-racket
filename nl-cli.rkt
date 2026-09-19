@@ -635,10 +635,20 @@
              (loop (cddr rem)))
            (loop (cdr rem)))]
 
-      ;; Non-option argument: treated as file/URL to execute
+      ;; Non-option argument: treated as file/URL to execute if it exists or if no actions yet
       [else
-       (set! actions (append actions (list (cons 'load (car rem)))))
-       (loop (cdr rem))]))
+       (define arg (car rem))
+       (cond
+         [(or (string-prefix? arg "http://")
+              (string-prefix? arg "https://")
+              (string-prefix? arg "file://")
+              (file-exists? arg)
+              (null? actions))
+          (set! actions (append actions (list (cons 'load arg))))
+          (loop (cdr rem))]
+         [else
+          ;; Non-existing argument after actions already queued: treated as command-line arguments
+          (loop (cdr rem))])]))
 
   ;; Execute actions in sequential order
   (for ([act actions])

@@ -313,6 +313,31 @@
           "(and (null? nil) (null? '()) (quote? '(quote (1 2))) (legal? \"my-var\"))"
           "true")
 
+;; 22. Control Flow Extensions (if-not, for, dostring, do-while, do-until)
+(check-nl "if-not true branch when condition nil"
+          "(if-not nil 'was-false 'was-true)"
+          "was-false")
+
+(check-nl "if-not false branch when condition true"
+          "(if-not true 'was-false 'was-true)"
+          "was-true")
+
+(check-nl "for loop with step"
+          "(begin (set 'acc '()) (for (i 1 5 2) (push i acc -1)) acc)"
+          "(1 3 5)")
+
+(check-nl "dostring iteration"
+          "(begin (set 'acc '()) (dostring (ch \"abc\") (push ch acc -1)) acc)"
+          "(\"a\" \"b\" \"c\")")
+
+(check-nl "do-while loop execution"
+          "(begin (set 'c 0) (set 'sum 0) (do-while (< c 5) (++ sum c) (++ c)) sum)"
+          "10")
+
+(check-nl "do-until loop execution"
+          "(begin (set 'c 0) (set 'sum 0) (do-until (>= c 5) (++ sum c) (++ c)) sum)"
+          "10")
+
 (printf "\n====================================================\n")
 (printf "Tests Total:  ~a\n" total-tests)
 (printf "Tests Passed: ~a\n" passed-tests)

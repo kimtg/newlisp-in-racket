@@ -85,6 +85,11 @@
 (test "main-args -1 is last arg" "bar" (cadr args-lines))
 (test "main-args out of range returns nil" "nil" (caddr args-lines))
 
+;; 5b. Script execution with command-line arguments (e.g. demo.lsp foo bar)
+(define demo-out (string-trim (call-cli '("demo.lsp" "argA" "argB"))))
+(test "demo.lsp runs with args without error" #t (string-contains? demo-out "argA"))
+(test "demo.lsp prints argB" #t (string-contains? demo-out "argB"))
+
 ;; 6. Working directory (-w)
 (define orig-dir (current-directory))
 (define w-out (string-trim (call-cli '("-w" "tests" "-e" "(file? {test-all.rkt})"))))
@@ -198,6 +203,17 @@
 (test "TCP server evaluates Lisp expression" "579" (string-trim lisp-line))
 
 (kill-thread srv-th)
+
+;; 11. Test #lang reader integration
+(define-values (rkt-sp rkt-stdout rkt-stdin rkt-stderr)
+  (subprocess #f #f #f (find-executable-path "racket") "tests/test-lang-demo.lsp" "hello" "world"))
+(close-output-port rkt-stdin)
+(define rkt-out (port->string rkt-stdout))
+(close-input-port rkt-stdout)
+(close-input-port rkt-stderr)
+(subprocess-wait rkt-sp)
+(test "#lang reader executes script" #t (string-contains? rkt-out "Fact 6 is: 720"))
+(test "#lang reader passes args" #t (string-contains? rkt-out "hello"))
 
 (printf "\n====================================================\n")
 (printf "CLI Tests Total:  ~a\n" test-count)

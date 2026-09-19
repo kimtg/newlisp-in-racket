@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/string
+         racket/list
          racket/port
          racket/system
          racket/date
@@ -42,40 +43,50 @@
           (loop)))))
 
 (define (parens-balanced? str)
-  (let loop ([chars (string->list str)] [depth 0] [in-str #f] [escape #f] [in-brace 0])
+  (let loop ([chars (string->list str)] [depth 0] [in-str #f] [escape #f] [in-brace 0] [in-raw-text #f])
     (cond
       [(null? chars)
-       (and (= depth 0) (not in-str) (= in-brace 0))]
+       (and (= depth 0) (not in-str) (= in-brace 0) (not in-raw-text))]
+      [in-raw-text
+       ;; Look for [/text]
+       (if (and (>= (length chars) 7)
+                (string=? (list->string (take chars 7)) "[/text]"))
+           (loop (drop chars 7) depth in-str escape in-brace #f)
+           (loop (cdr chars) depth in-str escape in-brace #t))]
       [in-str
        (define c (car chars))
        (cond
-         [escape (loop (cdr chars) depth in-str #f in-brace)]
-         [(char=? c #\\) (loop (cdr chars) depth in-str #t in-brace)]
-         [(char=? c #\") (loop (cdr chars) depth #f #f in-brace)]
-         [else (loop (cdr chars) depth in-str #f in-brace)])]
+         [escape (loop (cdr chars) depth in-str #f in-brace #f)]
+         [(char=? c #\\) (loop (cdr chars) depth in-str #t in-brace #f)]
+         [(char=? c #\") (loop (cdr chars) depth #f #f in-brace #f)]
+         [else (loop (cdr chars) depth in-str #f in-brace #f)])]
       [(> in-brace 0)
        (define c (car chars))
        (cond
-         [(char=? c #\{) (loop (cdr chars) depth in-str #f (+ in-brace 1))]
-         [(char=? c #\}) (loop (cdr chars) depth in-str #f (- in-brace 1))]
-         [else (loop (cdr chars) depth in-str #f in-brace)])]
+         [(char=? c #\{) (loop (cdr chars) depth in-str #f (+ in-brace 1) #f)]
+         [(char=? c #\}) (loop (cdr chars) depth in-str #f (- in-brace 1) #f)]
+         [else (loop (cdr chars) depth in-str #f in-brace #f)])]
       [else
        (define c (car chars))
        (cond
+         [(and (char=? c #\[)
+               (>= (length chars) 6)
+               (string=? (list->string (take chars 6)) "[text]"))
+          (loop (drop chars 6) depth in-str escape in-brace #t)]
          [(char=? c #\;)
           ;; Skip line comment
           (let skip-comment ([rem (cdr chars)])
             (if (or (null? rem) (char=? (car rem) #\newline))
-                (loop rem depth in-str escape in-brace)
+                (loop rem depth in-str escape in-brace #f)
                 (skip-comment (cdr rem))))]
-         [(char=? c #\") (loop (cdr chars) depth #t #f in-brace)]
-         [(char=? c #\{) (loop (cdr chars) depth in-str #f (+ in-brace 1))]
-         [(char=? c #\() (loop (cdr chars) (+ depth 1) in-str escape in-brace)]
+         [(char=? c #\") (loop (cdr chars) depth #t #f in-brace #f)]
+         [(char=? c #\{) (loop (cdr chars) depth in-str #f (+ in-brace 1) #f)]
+         [(char=? c #\() (loop (cdr chars) (+ depth 1) in-str escape in-brace #f)]
          [(char=? c #\))
           (if (<= depth 0)
               #f ; unbalanced closing paren
-              (loop (cdr chars) (- depth 1) in-str escape in-brace))]
-         [else (loop (cdr chars) depth in-str escape in-brace)])])))
+              (loop (cdr chars) (- depth 1) in-str escape in-brace #f))]
+         [else (loop (cdr chars) depth in-str escape in-brace #f)])])))
 
 (define (evaluate-and-print raw-input in out log-file log-all? continue-k)
   (define input-str

@@ -56,6 +56,23 @@
            t1
            (nl-if c2 t2 rest ...)))]))
 
+(define-syntax nl-if-not
+  (syntax-rules ()
+    [(_ c t)
+     (let ([it c])
+       (set-nl-symbol-value! sym-it it)
+       (if (not (nl-truthy? it)) t nl-nil))]
+    [(_ c t e)
+     (let ([it c])
+       (set-nl-symbol-value! sym-it it)
+       (if (not (nl-truthy? it)) t e))]
+    [(_ c1 t1 c2 t2 rest ...)
+     (let ([it c1])
+       (set-nl-symbol-value! sym-it it)
+       (if (not (nl-truthy? it))
+           t1
+           (nl-if-not c2 t2 rest ...)))]))
+
 (define-syntax-rule (nl-when c body ...)
   (let ([it c])
     (set-nl-symbol-value! sym-it it)
@@ -116,6 +133,26 @@
           (let ([res (begin body ...)])
             (loop (+ idx 1) res)))
         last-val)))
+
+(define-syntax-rule (nl-do-while test-cond body ...)
+  (let loop ([idx 0] [last-val nl-nil])
+    (set-nl-symbol-value! sym-idx idx)
+    (let ([res (begin body ...)])
+      (define it test-cond)
+      (set-nl-symbol-value! sym-it it)
+      (if (nl-truthy? it)
+          (loop (+ idx 1) res)
+          res))))
+
+(define-syntax-rule (nl-do-until test-cond body ...)
+  (let loop ([idx 0] [last-val nl-nil])
+    (set-nl-symbol-value! sym-idx idx)
+    (let ([res (begin body ...)])
+      (define it test-cond)
+      (set-nl-symbol-value! sym-it it)
+      (if (not (nl-truthy? it))
+          (loop (+ idx 1) res)
+          res))))
 
 (define-syntax nl-dotimes
   (syntax-rules ()
@@ -194,6 +231,107 @@
                        last-val
                        (let ([res (begin body ...)])
                          (loop (cdr cur) (+ i 1) res))))
+                 last-val)))
+         (lambda ()
+           (set-nl-symbol-value! var saved-var)
+           (set-nl-symbol-value! sym-idx saved-idx))))]))
+
+(define-syntax nl-for
+  (syntax-rules ()
+    [(_ (var from-expr to-expr) body ...)
+     (let ([from from-expr]
+           [to to-expr]
+           [saved-var (nl-symbol-value var)])
+       (define step (if (> to from) 1 -1))
+       (dynamic-wind
+         void
+         (lambda ()
+           (let loop ([cur from] [last-val nl-nil])
+             (if (if (> step 0) (<= cur to) (>= cur to))
+                 (begin
+                   (set-nl-symbol-value! var cur)
+                   (let ([res (begin body ...)])
+                     (loop (+ cur step) res)))
+                 last-val)))
+         (lambda ()
+           (set-nl-symbol-value! var saved-var))))]
+    [(_ (var from-expr to-expr step-expr) body ...)
+     (let ([from from-expr]
+           [to to-expr]
+           [step step-expr]
+           [saved-var (nl-symbol-value var)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let loop ([cur from] [last-val nl-nil])
+             (if (if (> step 0) (<= cur to) (>= cur to))
+                 (begin
+                   (set-nl-symbol-value! var cur)
+                   (let ([res (begin body ...)])
+                     (loop (+ cur step) res)))
+                 last-val)))
+         (lambda ()
+           (set-nl-symbol-value! var saved-var))))]
+    [(_ (var from-expr to-expr step-expr break-cond) body ...)
+     (let ([from from-expr]
+           [to to-expr]
+           [step step-expr]
+           [saved-var (nl-symbol-value var)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let loop ([cur from] [last-val nl-nil])
+             (if (if (> step 0) (<= cur to) (>= cur to))
+                 (begin
+                   (set-nl-symbol-value! var cur)
+                   (if (nl-truthy? break-cond)
+                       last-val
+                       (let ([res (begin body ...)])
+                         (loop (+ cur step) res))))
+                 last-val)))
+         (lambda ()
+           (set-nl-symbol-value! var saved-var))))]))
+
+(define-syntax nl-dostring
+  (syntax-rules ()
+    [(_ (var str-expr) body ...)
+     (let* ([s str-expr]
+            [str (if (string? s) s (~a s))]
+            [len (string-length str)]
+            [saved-var (nl-symbol-value var)]
+            [saved-idx (nl-symbol-value sym-idx)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let loop ([i 0] [last-val nl-nil])
+             (if (< i len)
+                 (begin
+                   (set-nl-symbol-value! var (string (string-ref str i)))
+                   (set-nl-symbol-value! sym-idx i)
+                   (let ([res (begin body ...)])
+                     (loop (+ i 1) res)))
+                 last-val)))
+         (lambda ()
+           (set-nl-symbol-value! var saved-var)
+           (set-nl-symbol-value! sym-idx saved-idx))))]
+    [(_ (var str-expr break-cond) body ...)
+     (let* ([s str-expr]
+            [str (if (string? s) s (~a s))]
+            [len (string-length str)]
+            [saved-var (nl-symbol-value var)]
+            [saved-idx (nl-symbol-value sym-idx)])
+       (dynamic-wind
+         void
+         (lambda ()
+           (let loop ([i 0] [last-val nl-nil])
+             (if (< i len)
+                 (begin
+                   (set-nl-symbol-value! var (string (string-ref str i)))
+                   (set-nl-symbol-value! sym-idx i)
+                   (if (nl-truthy? break-cond)
+                       last-val
+                       (let ([res (begin body ...)])
+                         (loop (+ i 1) res))))
                  last-val)))
          (lambda ()
            (set-nl-symbol-value! var saved-var)
@@ -374,10 +512,11 @@
 (define (nl-foop-dispatch method-sym target-sym-or-expr target-obj args)
   (unless (and (pair? target-obj) (or (nl-symbol? (car target-obj)) (nl-context? (car target-obj))))
     (error 'eval "FOOP target must be an object list (Class ...): ~a" target-obj))
+  (define class-head (car target-obj))
   (define class-ctx
-    (if (nl-context? (car target-obj))
-        (car target-obj)
-        (get-or-create-context (nl-symbol-name (car target-obj)))))
+    (if (nl-context? class-head)
+        class-head
+        (get-or-create-context (nl-symbol-name class-head))))
   (define clean-name (if (string? method-sym) method-sym (let ([s (~a method-sym)]) (if (string-prefix? s ":") (substring s 1) s))))
   (define method-func (hash-ref (nl-context-symbols class-ctx) clean-name #f))
   (unless method-func
@@ -389,12 +528,26 @@
     (set! mut-obj new-val)
     (when is-sym?
       (set-nl-symbol-value! target-sym-or-expr new-val)))
-  (parameterize ([current-self-target mut-obj]
-                 [current-self-updater update-target-place!]
-                 [current-context class-ctx])
-    (define res (nl-fast-call func-val args))
-    (update-target-place! (current-self-target))
-    res))
+
+  (define prev-target (current-self-target))
+  (define prev-updater (current-self-updater))
+  (define prev-ctx (current-context))
+
+  (current-self-target mut-obj)
+  (current-self-updater update-target-place!)
+  (current-context class-ctx)
+
+  (define res
+    (if (and (nl-lambda? func-val) (nl-lambda-compiled-proc func-val))
+        (apply (nl-lambda-compiled-proc func-val) args)
+        (nl-fast-call func-val args)))
+
+  (update-target-place! (current-self-target))
+
+  (current-self-target prev-target)
+  (current-self-updater prev-updater)
+  (current-context prev-ctx)
+  res)
 
 ;; Dynamic scoping binder for lambdas
 (define (bind-and-run params-syms args-list target-ctx thunk)
@@ -420,3 +573,92 @@
         (set-nl-symbol-value! (car b) (cdr b)))
       (current-call-args saved-args)
       (current-context saved-ctx))))
+
+;; -------------------------------------------------------------------
+;; FOOP Self Place Helpers & Fast Primitives
+;; -------------------------------------------------------------------
+
+(define (nl-self-ref . idxs)
+  (define cur (current-self-target))
+  (if (null? idxs)
+      cur
+      (nl-index-list cur idxs)))
+
+(define (nl-self-inc-dec! op idx [delta #f])
+  (define cur-target (current-self-target))
+  (unless (list? cur-target)
+    (error 'self "current FOOP target is not a list: ~a" cur-target))
+  (define norm-idx (if (< idx 0) (+ (length cur-target) idx) idx))
+  (define old-val (list-ref cur-target norm-idx))
+  (define new-val
+    (case op
+      [(++)
+       (define d (if delta (inexact->exact (truncate delta)) 1))
+       (define base (if (number? old-val) (inexact->exact (truncate old-val)) 0))
+       (+ base d)]
+      [(--)
+       (define d (if delta (inexact->exact (truncate delta)) 1))
+       (define base (if (number? old-val) (inexact->exact (truncate old-val)) 0))
+       (- base d)]
+      [(inc)
+       (define d (if delta (exact->inexact delta) 1.0))
+       (define base (if (number? old-val) (exact->inexact old-val) 0.0))
+       (+ base d)]
+      [(dec)
+       (define d (if delta (exact->inexact delta) 1.0))
+       (define base (if (number? old-val) (exact->inexact old-val) 0.0))
+       (- base d)]))
+  (define new-target (list-set-path cur-target (list norm-idx) new-val))
+  (current-self-target new-target)
+  ((current-self-updater) new-target)
+  new-val)
+
+(define (nl-self-setf! idx val)
+  (define cur-target (current-self-target))
+  (define new-target (list-set-path cur-target (if (list? idx) idx (list idx)) val))
+  (current-self-target new-target)
+  ((current-self-updater) new-target)
+  val)
+
+(define (nl-fast-map fn . lsts)
+  (cond
+    [(and (null? (cdr lsts)) (nl-lambda? fn) (nl-lambda-compiled-proc fn))
+     (define proc (nl-lambda-compiled-proc fn))
+     (map proc (car lsts))]
+    [(and (null? (cdr lsts)) (procedure? fn))
+     (map fn (car lsts))]
+    [else
+     (apply map (lambda xs (nl-fast-call fn xs)) lsts)]))
+
+(define (nl-fast-filter fn lst)
+  (cond
+    [(and (nl-lambda? fn) (nl-lambda-compiled-proc fn))
+     (define proc (nl-lambda-compiled-proc fn))
+     (filter (lambda (x) (nl-truthy? (proc x))) lst)]
+    [(procedure? fn)
+     (filter (lambda (x) (nl-truthy? (fn x))) lst)]
+    [else
+     (filter (lambda (x) (nl-truthy? (nl-fast-call fn (list x)))) lst)]))
+
+(define (nl-fast-clean fn lst)
+  (cond
+    [(and (nl-lambda? fn) (nl-lambda-compiled-proc fn))
+     (define proc (nl-lambda-compiled-proc fn))
+     (filter (lambda (x) (not (nl-truthy? (proc x)))) lst)]
+    [(procedure? fn)
+     (filter (lambda (x) (not (nl-truthy? (fn x)))) lst)]
+    [else
+     (filter (lambda (x) (not (nl-truthy? (nl-fast-call fn (list x))))) lst)]))
+
+(define (nl-fast-length x)
+  (cond
+    [(list? x) (length x)]
+    [(string? x) (string-length x)]
+    [(nl-array? x) (apply * (nl-array-dims x))]
+    [else 0]))
+
+(define (nl-fast-sequence from to [step #f])
+  (define s (or step (if (> to from) 1 -1)))
+  (if (> s 0)
+      (for/list ([i (in-range from (+ to 1) s)]) i)
+      (for/list ([i (in-range from (- to 1) s)]) i)))
