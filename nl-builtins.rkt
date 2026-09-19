@@ -952,7 +952,17 @@
 
 (reg-prim! "main-args"
   (lambda (e a c)
-    (nl-symbol-value sym-main-args)))
+    (define args-list (nl-symbol-value sym-dollar-main-args))
+    (if (null? a)
+        (if (list? args-list) args-list '())
+        (let ([idx (car a)])
+          (if (and (integer? idx) (list? args-list))
+              (let* ([len (length args-list)]
+                     [actual-idx (if (< idx 0) (+ len idx) idx)])
+                (if (and (>= actual-idx 0) (< actual-idx len))
+                    (list-ref args-list actual-idx)
+                    nl-nil))
+              nl-nil)))))
 
 (reg-prim! "env"
   (lambda (e a c)
@@ -1118,12 +1128,33 @@
 
 (reg-prim! "load"
   (lambda (e a c)
-    (define filename (car a))
-    (if (file-exists? filename)
-        (let* ([source (file->string filename)]
-               [exprs (nl-read-all source (lambda (s) (find-or-create-symbol s (current-context))))])
-          (eval-body exprs))
-        (error 'load "file not found: ~a" filename))))
+    (define target-ctx
+      (let ([last-arg (and (pair? a) (last a))])
+        (if (and (> (length a) 1) (nl-context? last-arg))
+            last-arg
+            (if (and (> (length a) 1) (nl-symbol? last-arg))
+                (get-or-create-context (nl-symbol-name last-arg))
+                #f))))
+    (define files (if target-ctx (drop-right a 1) a))
+    (define last-result nl-nil)
+    (parameterize ([current-context (or target-ctx (current-context))])
+      (for ([filename files])
+        (define source
+          (cond
+            [(or (string-prefix? filename "http://")
+                 (string-prefix? filename "https://")
+                 (string-prefix? filename "file://"))
+             (define body (perform-http-request #"GET" filename #f "" #f #f))
+             (if (string-prefix? body "ERR:")
+                 (error 'load "cannot load URL ~a: ~a" filename body)
+                 body)]
+            [(file-exists? filename)
+             (file->string filename)]
+            [else
+             (error 'load "file not found: ~a" filename)]))
+        (define exprs (nl-read-all source (lambda (s) (find-or-create-symbol s (current-context)))))
+        (set! last-result (eval-body exprs))))
+    last-result))
 
 (reg-prim! "exec"
   (lambda (e a c)
@@ -1304,7 +1335,7 @@
 (reg-prim! "$" (lambda (e a c) (nl-regex-dollar a)))
 (reg-prim! "delete" (lambda (e a c) (nl-delete a)))
 (reg-prim! "reset" (lambda (e a c) (nl-reset)))
-(reg-prim! "sys-info" (lambda (e a c) (nl-sys-info)))
+(reg-prim! "sys-info" (lambda (e a c) (nl-sys-info a)))
 (reg-prim! "sys-error" (lambda (e a c) (nl-sys-error a)))
 (reg-prim! "last-error" (lambda (e a c) (nl-last-error)))
 (reg-prim! "uuid" (lambda (e a c) (nl-uuid)))

@@ -75,6 +75,7 @@
     [(string=? name "$it") #'(nl-symbol-value sym-it)]
     [(string=? name "$idx") #'(nl-symbol-value sym-idx)]
     [(string=? name "$args") #'(nl-symbol-value sym-args)]
+    [(string=? name "$main-args") #'(nl-symbol-value sym-dollar-main-args)]
     [(string=? name "main-args") #'(nl-symbol-value sym-main-args)]
     [(string=? name "nil") #'nl-nil]
     [(string=? name "true") #'nl-true]

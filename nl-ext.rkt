@@ -7,6 +7,7 @@
          racket/system
          racket/date
          racket/port
+         racket/os
          "nl-types.rkt"
          "nl-eval.rkt"
          "nl-files.rkt")
@@ -528,8 +529,36 @@
   (*last-error-msg* "no error")
   nl-true)
 
-(define (nl-sys-info)
-  (list 10706 "Windows" 64 0 0 0))
+(define *max-cells* (make-parameter 268435456))
+(define *stack-size* (make-parameter 2048))
+
+(define (nl-sys-info [args '()])
+  (define os-code
+    (case (system-type 'os)
+      [(windows) 6]
+      [(macosx) 3]
+      [else 1]))
+  (define os-val (+ os-code 256 128)) ;; 64-bit + UTF-8
+  (define pid (getpid))
+  (define info-list
+    (list 429
+          (*max-cells*)
+          402
+          1
+          0
+          (*stack-size*)
+          0
+          pid
+          10706
+          os-val))
+  (if (null? args)
+      info-list
+      (let* ([idx (car args)]
+             [len (length info-list)]
+             [actual-idx (if (< idx 0) (+ len idx) idx)])
+        (if (and (>= actual-idx 0) (< actual-idx len))
+            (list-ref info-list actual-idx)
+            nl-nil))))
 
 (define (nl-sys-error args)
   (if (pair? args)

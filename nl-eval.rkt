@@ -68,6 +68,7 @@
 (define sym-idx (find-or-create-symbol "$idx" main-context))
 (define sym-args (find-or-create-symbol "$args" main-context))
 (define sym-main-args (find-or-create-symbol "main-args" main-context))
+(define sym-dollar-main-args (find-or-create-symbol "$main-args" main-context))
 
 (define (set-symbol-val! sym val)
   (if (nl-symbol-protected? sym)
