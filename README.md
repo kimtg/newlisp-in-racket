@@ -108,6 +108,62 @@ The resulting `newlisp.exe` is self-contained and runs without needing Racket in
 
 ---
 
+## Command-Line Options
+
+Display the built-in help text at any time with the `-h` flag:
+
+```bash
+racket main.rkt -h
+# or with standalone executable:
+./newlisp.exe -h
+```
+
+```text
+ -h this help (no init.lsp)
+ -n no init.lsp (must be first)
+ -x <source> <target> link (no init.lsp)
+ -v version
+ -s <stacksize>
+ -m <max-mem-MB> cell memory
+ -e <quoted lisp expression>
+ -l <path-file> log connections
+ -L <path-file> log all
+ -w <working dir>
+ -c no prompts, HTTP
+ -C force prompts
+ -t <usec-server-timeout>
+ -p <port-no>
+ -d <port-no> demon mode
+ -http only
+ -http-safe safe mode
+ -6 IPv6 mode
+```
+
+### Options Reference
+
+| Option | Syntax / Arguments | Description |
+| :--- | :--- | :--- |
+| `-h` | `-h` | Display the command-line help text and exit (suppresses `init.lsp`). |
+| `-n` | `-n` | Do not load `init.lsp` or `.init.lsp` (must be the first option on the command line). |
+| `-x` | `-x <source> <target>` | Link and embed a source Lisp script into a target standalone binary without loading `init.lsp`. |
+| `-v` | `-v` | Display version banner (`newLISP v.10.7.6 [Racket] ...`) and exit. |
+| `-s` | `-s <stacksize>` | Set the maximum evaluation call stack depth (default: `1024`). Can be attached (e.g., `-s2048`). |
+| `-m` | `-m <max-mem-MB>` | Set the maximum cell memory limit in megabytes. Can be attached (e.g., `-m64`). |
+| `-e` | `-e "<expr>"` | Evaluate the quoted newLISP expression and print the result. Multiple `-e` flags can be chained. |
+| `-l` | `-l <path-file>` | Log network and HTTP connections to the specified file. |
+| `-L` | `-L <path-file>` | Log all incoming and outgoing network and HTTP traffic to the specified file. |
+| `-w` | `-w <dir>` | Set the initial working directory for script execution. |
+| `-c` | `-c` | Suppress interactive prompts and banner (ideal for HTTP server or piped batch mode). |
+| `-C` | `-C` | Force prompt display even when input is redirected or after running scripts. |
+| `-t` | `-t <usec>` | Set the server network socket timeout in microseconds. |
+| `-p` | `-p <port-no>` | Start a TCP/HTTP server on `<port-no>` in single-session mode (exits after handling). |
+| `-d` | `-d <port-no>` | Start a TCP/HTTP server in daemon mode (continuously listens and accepts connections). |
+| `-http` | `-http` | Restrict server mode to HTTP requests only (rejects raw Lisp socket commands). |
+| `-http-safe` | `-http-safe` | Restrict HTTP server to safe mode (blocks directory traversal attempts containing `..` or `//`). |
+| `-6` | `-6` | Enable IPv6 networking mode for socket operations and servers. |
+
+---
+
 ## Code Examples
 
 ### 1. Functional Object-Oriented Programming (FOOP)
