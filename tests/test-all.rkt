@@ -6,6 +6,7 @@
          "../nl-types.rkt"
          "../nl-reader.rkt"
          "../nl-eval.rkt"
+         "../nl-transpile.rkt"
          "../nl-builtins.rkt")
 
 (define total-tests 0)

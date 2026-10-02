@@ -11,13 +11,13 @@
          "../nl-transpile.rkt")
 
 (define orig-newlisp-path
-  (let ([cand (or (find-executable-path "newlisp.exe")
-                  (find-executable-path "newlisp"))])
-    (cond
-      [(and cand (file-exists? cand)) cand]
-      [(file-exists? "C:\\Program Files (x86)\\newlisp\\newlisp.exe") "C:\\Program Files (x86)\\newlisp\\newlisp.exe"]
-      [(file-exists? "C:\\Program Files\\newlisp\\newlisp.exe") "C:\\Program Files\\newlisp\\newlisp.exe"]
-      [else #f])))
+  (cond
+    [(file-exists? "C:\\Program Files (x86)\\newlisp\\newlisp.exe") "C:\\Program Files (x86)\\newlisp\\newlisp.exe"]
+    [(file-exists? "C:\\Program Files\\newlisp\\newlisp.exe") "C:\\Program Files\\newlisp\\newlisp.exe"]
+    [else
+     (let ([cand (or (find-executable-path "newlisp.exe")
+                     (find-executable-path "newlisp"))])
+       (and cand (file-exists? cand) cand))]))
 
 (define (run-orig-newlisp code-str)
   (if (not orig-newlisp-path)

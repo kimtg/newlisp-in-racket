@@ -61,7 +61,8 @@
   (name
    symbols          ; hash: string -> nl-symbol
    [default-functor #:mutable]
-   [protected? #:mutable])
+   [protected? #:mutable]
+   [method-cache #:mutable])
   #:transparent
   #:methods gen:custom-write
   [(define (write-proc val port mode)

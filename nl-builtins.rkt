@@ -16,6 +16,7 @@
          "nl-types.rkt"
          "nl-reader.rkt"
          "nl-eval.rkt"
+         "nl-transpile.rkt"
          "nl-http.rkt"
          "nl-files.rkt"
          "nl-math-ext.rkt"

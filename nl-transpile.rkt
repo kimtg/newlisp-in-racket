@@ -808,14 +808,23 @@
         (values op (car args) (cdr args))))
   (define method-str (if (nl-symbol? method-sym) (nl-symbol-name method-sym) (~a method-sym)))
   (define clean-name (if (string-prefix? method-str ":") (substring method-str 1) method-str))
+  (define clean-sym (string->symbol clean-name))
   (define is-sym? (nl-symbol? target-expr))
   (define var-sym (if is-sym? (resolve-symbol-in-context target-expr ctx) #f))
   (define target-stx (if is-sym? #`(nl-symbol-value #,var-sym) (transpile-expr target-expr ctx)))
-  (define sym-stx (if is-sym? var-sym #`'#,target-expr))
-  #`(nl-foop-dispatch '#,clean-name
-                      #,sym-stx
-                      #,target-stx
-                      (list #,@(for/list ([a rest-args]) (transpile-expr a ctx)))))
+  (define sym-stx (if is-sym? var-sym #'#f))
+  (case (length rest-args)
+    [(0)
+     #`(nl-foop-dispatch-0 '#,clean-sym #,sym-stx #,target-stx)]
+    [(1)
+     #`(nl-foop-dispatch-1 '#,clean-sym #,sym-stx #,target-stx #,(transpile-expr (car rest-args) ctx))]
+    [(2)
+     #`(nl-foop-dispatch-2 '#,clean-sym #,sym-stx #,target-stx #,(transpile-expr (car rest-args) ctx) #,(transpile-expr (cadr rest-args) ctx))]
+    [else
+     #`(nl-foop-dispatch '#,clean-sym
+                         #,sym-stx
+                         #,target-stx
+                         (list #,@(for/list ([a rest-args]) (transpile-expr a ctx))))]))
 
 (define (transpile-general-app op args ctx)
   (if (nl-symbol? op)

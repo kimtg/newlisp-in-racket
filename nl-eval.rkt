@@ -13,7 +13,7 @@
 ;; -------------------------------------------------------------------
 
 (define global-contexts (make-hash))
-(define main-context (nl-context "MAIN" (make-hash) nl-nil #f))
+(define main-context (nl-context "MAIN" (make-hash) nl-nil #f (make-hasheq)))
 (hash-set! global-contexts "MAIN" main-context)
 (define current-context (make-parameter main-context))
 
@@ -53,7 +53,7 @@
 (define (get-or-create-context name [default-functor nl-nil])
   (hash-ref! global-contexts name
              (lambda ()
-               (define ctx (nl-context name (make-hash) default-functor #f))
+               (define ctx (nl-context name (make-hash) default-functor #f (make-hasheq)))
                (unless (string=? name "MAIN")
                  (define sym (find-or-create-symbol name main-context))
                  (set-nl-symbol-value! sym ctx))
@@ -73,11 +73,11 @@
 (define (set-symbol-val! sym val)
   (if (nl-symbol-protected? sym)
       (error 'eval "symbol is protected: ~a" (nl-symbol-name sym))
-      (begin
+      (let ([ctx (hash-ref global-contexts (nl-symbol-context-name sym) #f)])
         (set-nl-symbol-value! sym val)
-        (when (string=? (nl-symbol-name sym) (nl-symbol-context-name sym))
-          (define ctx (hash-ref global-contexts (nl-symbol-context-name sym) #f))
-          (when ctx
+        (when ctx
+          (hash-remove! (nl-context-method-cache ctx) (string->symbol (nl-symbol-name sym)))
+          (when (string=? (nl-symbol-name sym) (nl-symbol-context-name sym))
             (set-nl-context-default-functor! ctx val))))))
 
 ;; -------------------------------------------------------------------
