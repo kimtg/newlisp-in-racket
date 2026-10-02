@@ -245,30 +245,30 @@ newlisp-in-racket/
 │   ├── test-compiled.rkt      # Unit test suite for transpiler (96 tests)
 │   └── test-cli.rkt           # CLI, option flags, and subprocess test suite (30 tests)
 ├── benchmarks/
-│   └── bench-compare.rkt      # Benchmark comparing interpreted vs transpiled performance
+│   └── bench-compare.rkt      # Benchmark against original newLISP (C binary vs Racket)
 ├── demo.lsp                   # Feature demonstration script
 └── newlisp_manual.html        # Complete reference manual for newLISP 10.7.5
 ```
 
 ---
 
-## Performance & Benchmarks
+## Benchmark Against Original newLISP
 
-The transpiler (`nl-transpile.rkt`) compiles newLISP ASTs into Racket constructs, utilizing unboxed operations, direct identifier bindings, optimized place mutations, and native Racket higher-order dispatch.
+The optimizing transpiler (`nl-transpile.rkt`) compiles newLISP ASTs into native Racket forms, utilizing unboxed operations, direct identifier bindings, optimized place mutations, and native Racket bytecode compilation to rival and often surpass the original C newLISP engine.
 
 Run the benchmark suite:
 ```bash
 racket benchmarks/bench-compare.rkt
 ```
 
-### Sample Benchmark Results
+### Benchmark Results (Original C newLISP vs Racket)
 
-| Benchmark | Interpreted | Transpiled | Speedup |
+| Benchmark | Original C newLISP (v10.7.1) | Racket Transpiled | Transpiled vs Original newLISP |
 | :--- | :--- | :--- | :--- |
-| **Recursive Fibonacci** (`fib 30`) | `2854 ms` | `137 ms` | **20.8x faster** |
-| **Tight Loop Mutation** (`dotimes 1,000,000` with `++`) | `901 ms` | `6.5 ms` | **139.6x faster** |
-| **List Operations** (`sequence`, `map`, `filter` 100,000 items) | `142 ms` | `17.3 ms` | **8.2x faster** |
-| **FOOP Method Dispatch** (100,000 invocations) | `425 ms` | `77.6 ms` | **5.5x faster** |
+| **Recursive Fibonacci** (`fib 30`) | `245.0 ms` | `180.0 ms` | **1.4x faster** |
+| **Tight Loop Mutation** (`dotimes 1,000,000` with `++`) | `27.3 ms` | `6.6 ms` | **4.1x faster** |
+| **List Operations** (`sequence`, `map`, `filter` 100k items) | `26.1 ms` | `20.3 ms` | **1.3x faster** |
+| **FOOP Method Dispatch** (100,000 invocations) | `11.4 ms` | `86.3 ms` | `0.13x relative` |
 
 ---
 
