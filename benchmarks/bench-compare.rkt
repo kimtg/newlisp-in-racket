@@ -34,11 +34,6 @@
         (define time-val (and (pair? lines) (string->number (string-trim (car lines)))))
         (values time-val time-val))))
 
-(define (eval-interp code-str)
-  (define exprs
-    (nl-read-all code-str (lambda (s) (find-or-create-symbol s (current-context)))))
-  (eval-body exprs))
-
 (define (measure thunk)
   (define start (current-inexact-milliseconds))
   (define res (thunk))
@@ -50,7 +45,7 @@
   (printf " Benchmark: ~a\n" name)
   (printf "------------------------------------------------------------\n")
 
-  ;; Warm-up / compile first
+  ;; Warm-up / compile
   (define compiled-thunk (compile-nl-body (nl-read-all code-str (lambda (s) (find-or-create-symbol s (current-context))))))
 
   ;; 1. Original C newLISP run (if available)
@@ -63,21 +58,13 @@
                (printf "   Time: ~a ms\n" (~r t #:precision '(= 2))))
              t))))
 
-  ;; 2. Interpreted run (Racket tree-walker)
-  (printf " [Racket Interpreted] Running tree-walker...\n")
-  (define-values (res-interp time-interp)
-    (measure (lambda () (eval-interp code-str))))
-  (printf "   Time: ~a ms | Result: ~a\n" (~r time-interp #:precision '(= 2)) (nl->string res-interp #t))
-
-  ;; 3. Transpiled & Compiled run (Racket JIT)
-  (printf " [Racket Transpiled]  Running native Racket bytecode...\n")
+  ;; 2. Transpiled & Compiled run (Racket JIT)
+  (printf " [Racket Transpiled]  Running compiled bytecode...\n")
   (define-values (res-compiled time-compiled)
     (measure (lambda () (compiled-thunk))))
   (printf "   Time: ~a ms | Result: ~a\n" (~r time-compiled #:precision '(= 2)) (nl->string res-compiled #t))
 
-  ;; Comparisons
-  (define speedup (/ time-interp (max 0.001 time-compiled)))
-  (printf " >> Transpiled vs Interpreted: ~ax FASTER!\n" (~r speedup #:precision '(= 1)))
+  ;; Comparison
   (when orig-time
     (define vs-orig (/ orig-time (max 0.001 time-compiled)))
     (if (>= vs-orig 1.0)

@@ -47,14 +47,9 @@
 (define HEADER-LEN 10)
 (define FOOTER-LEN (+ HEADER-LEN TRAILER-LEN))
 
-;; Evaluate expression string using compiler if possible, falling back to interpreter
+;; Evaluate expression string using optimizing compiler
 (define (eval-smart code-str)
-  (with-handlers ([exn:fail?
-                   (lambda (e)
-                     (define exprs
-                       (nl-read-all code-str (lambda (s) (find-or-create-symbol s (current-context)))))
-                     (eval-body exprs))])
-    (eval-compiled-string code-str)))
+  (eval-compiled-string code-str))
 
 ;; Check if current running executable has linked/embedded code
 (define (get-embedded-source [exe-path #f])
@@ -414,9 +409,7 @@
                        (log-write log-file (format "[~a] SOCKET OUT: ~a" (date->string (current-date) #t) err-str))))])
     (define exprs (nl-read-all final-cmd (lambda (s) (find-or-create-symbol s (current-context)))))
     (for ([expr exprs])
-      (define res
-        (with-handlers ([exn:fail? (lambda (e) (nl-eval expr))])
-          (eval-compiled expr)))
+      (define res (eval-compiled expr))
       (define res-str (nl->string res #t))
       (displayln res-str cout)
       (when log-all?

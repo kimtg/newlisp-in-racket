@@ -450,9 +450,20 @@
     [(and (nl-lambda? functor) (nl-lambda-compiled-proc functor))
      (apply (nl-lambda-compiled-proc functor) args)]
 
-    ;; 2. Standard Lambda
+    ;; 2. Standard Lambda (compile on demand if not compiled)
     [(nl-lambda? functor)
-     (apply-lambda functor args)]
+     (define proc
+       (or (nl-lambda-compiled-proc functor)
+           (let ([compiler (nl-compile-lambda-handler)])
+             (if compiler
+                 (let ([p (compiler (nl-lambda-params functor)
+                                    (nl-lambda-body functor)
+                                    (get-or-create-context (nl-lambda-ctx-name functor))
+                                    (nl-lambda-is-macro? functor))])
+                   (set-nl-lambda-compiled-proc! functor p)
+                   p)
+                 (error 'eval "cannot call uncompiled lambda without compiler")))))
+     (apply proc args)]
 
     ;; 3. Builtin Primitive
     [(nl-primitive? functor)
@@ -750,3 +761,83 @@
   (if (> s 0)
       (for/list ([i (in-range from (+ to 1) s)]) i)
       (for/list ([i (in-range from (- to 1) s)]) i)))
+
+;; -------------------------------------------------------------------
+;; Place Mutation Operations (push, pop, swap, set)
+;; -------------------------------------------------------------------
+
+(define (eval-place p)
+  (cond
+    [(nl-symbol? p) (nl-symbol-value p)]
+    [(and (pair? p) (nl-symbol? (car p)))
+     (define op-name (nl-symbol-name (car p)))
+     (cond
+       [(string=? op-name "self")
+        (apply nl-self-ref (cdr p))]
+       [else
+        (define head-val (nl-symbol-value (car p)))
+        (nl-fast-call head-val (cdr p))])]
+    [else p]))
+
+(define (eval-set sym val)
+  (unless (nl-symbol? sym)
+    (error 'set "expected a symbol, got ~a" sym))
+  (set-symbol-val! sym val)
+  val)
+
+(define (nl-push! val place-expr [idx 0])
+  (define raw-target (eval-place place-expr))
+  (define target (if (nl-nil? raw-target) '() raw-target))
+  (cond
+    [(list? target)
+     (define len (length target))
+     (define norm-idx
+       (cond
+         [(< idx 0) (max 0 (+ len idx 1))]
+         [(> idx len) len]
+         [else idx]))
+     (define-values (head tail) (split-at target norm-idx))
+     (define new-list (append head (list val) tail))
+     (mutate-place! place-expr new-list)
+     new-list]
+    [(string? target)
+     (define val-str (if (string? val) val (~a val)))
+     (define len (string-length target))
+     (define norm-idx
+       (cond
+         [(< idx 0) (max 0 (+ len idx 1))]
+         [(> idx len) len]
+         [else idx]))
+     (define new-str (string-append (substring target 0 norm-idx) val-str (substring target norm-idx)))
+     (mutate-place! place-expr new-str)
+     new-str]
+    [else (error 'push "invalid place for push: ~a" target)]))
+
+(define (nl-pop! place-expr [idx 0])
+  (define target (eval-place place-expr))
+  (cond
+    [(list? target)
+     (when (null? target) (error 'pop "cannot pop from empty list"))
+     (define len (length target))
+     (define norm-idx (if (< idx 0) (+ len idx) idx))
+     (define popped (list-ref target norm-idx))
+     (define new-list (append (take target norm-idx) (drop target (+ norm-idx 1))))
+     (mutate-place! place-expr new-list)
+     popped]
+    [(string? target)
+     (define len (string-length target))
+     (when (= len 0) (error 'pop "cannot pop from empty string"))
+     (define norm-idx (if (< idx 0) (+ len idx) idx))
+     (define popped (substring target norm-idx (+ norm-idx 1)))
+     (define new-str (string-append (substring target 0 norm-idx) (substring target (+ norm-idx 1))))
+     (mutate-place! place-expr new-str)
+     popped]
+    [else (error 'pop "invalid place for pop: ~a" target)]))
+
+(define (nl-swap! p1 p2)
+  (define v1 (eval-place p1))
+  (define v2 (eval-place p2))
+  (mutate-place! p1 v2)
+  (mutate-place! p2 v1)
+  v1)
+

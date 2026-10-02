@@ -81,7 +81,7 @@
             (set-nl-context-default-functor! ctx val))))))
 
 ;; -------------------------------------------------------------------
-;; Dynamic Scoping Mechanism
+;; Dynamic Scoping Mechanism & FOOP Execution State
 ;; -------------------------------------------------------------------
 
 (define (with-dynamic-bindings bindings thunk)
@@ -135,360 +135,29 @@
     [else ast]))
 
 ;; -------------------------------------------------------------------
-;; Evaluator: nl-eval
+;; Transpiler / Compiler Execution Hooks (Tree-walker eliminated)
 ;; -------------------------------------------------------------------
+
+(define nl-eval-handler (make-parameter #f))
+(define nl-eval-body-handler (make-parameter #f))
+(define nl-compile-lambda-handler (make-parameter #f))
 
 (define (nl-eval expr [ctx #f])
   (when ctx (current-context ctx))
-  (cond
-    ;; Self-evaluating types
-    [(nl-nil? expr) nl-nil]
-    [(nl-true? expr) nl-true]
-    [(number? expr) expr]
-    [(string? expr) expr]
-    [(nl-array? expr) expr]
-    [(nl-context? expr) expr]
-    [(nl-primitive? expr) expr]
-    [(nl-lambda? expr) expr]
-    [(null? expr) '()]
+  (define handler (nl-eval-handler))
+  (if handler
+      (handler expr (or ctx (current-context)))
+      (error 'eval "nl-eval handler not initialized; transpile module required")))
 
-    ;; Symbol lookup: returns current dynamic value
-    [(nl-symbol? expr)
-     (nl-symbol-value expr)]
-
-    ;; List expression: (functor . args)
-    [(pair? expr)
-     (define raw-functor (car expr))
-     (define raw-args (cdr expr))
-
-     ;; Check for special forms dispatch by name
-     (define sf-name (and (nl-symbol? raw-functor) (nl-symbol-name raw-functor)))
-     (cond
-       ;; Special Form: quote
-       [(and sf-name (string=? sf-name "quote"))
-        (if (pair? raw-args) (car raw-args) '())]
-
-       ;; Special Form: if
-       [(and sf-name (string=? sf-name "if"))
-        (eval-if raw-args)]
-
-       ;; Special Form: if-not
-       [(and sf-name (string=? sf-name "if-not"))
-        (eval-if-not raw-args)]
-
-       ;; Special Form: when
-       [(and sf-name (string=? sf-name "when"))
-        (if (null? raw-args)
-            nl-nil
-            (let ([cond-val (nl-eval (car raw-args))])
-              (set-symbol-val! sym-it cond-val)
-              (if (nl-truthy? cond-val)
-                  (eval-body (cdr raw-args))
-                  nl-nil)))]
-
-       ;; Special Form: unless
-       [(and sf-name (string=? sf-name "unless"))
-        (if (null? raw-args)
-            nl-nil
-            (let ([cond-val (nl-eval (car raw-args))])
-              (set-symbol-val! sym-it cond-val)
-              (if (not (nl-truthy? cond-val))
-                  (eval-body (cdr raw-args))
-                  nl-nil)))]
-
-       ;; Special Form: cond
-       [(and sf-name (string=? sf-name "cond"))
-        (eval-cond raw-args)]
-
-       ;; Special Form: case
-       [(and sf-name (string=? sf-name "case"))
-        (eval-case raw-args)]
-
-       ;; Special Form: set / setq / setf
-       [(and sf-name (or (string=? sf-name "set")
-                         (string=? sf-name "setq")
-                         (string=? sf-name "setf")))
-        (eval-set-forms sf-name raw-args)]
-
-       ;; Special Form: define
-       [(and sf-name (string=? sf-name "define"))
-        (eval-define raw-args #f)]
-
-       ;; Special Form: define-macro
-       [(and sf-name (string=? sf-name "define-macro"))
-        (eval-define raw-args #t)]
-
-       ;; Special Form: macro (expansion macro)
-       [(and sf-name (string=? sf-name "macro"))
-        (eval-macro-def raw-args)]
-
-       ;; Special Form: lambda / fn
-       [(and sf-name (or (string=? sf-name "lambda")
-                         (string=? sf-name "fn")))
-        (eval-lambda-constructor raw-args #f)]
-
-       ;; Special Form: lambda-macro
-       [(and sf-name (string=? sf-name "lambda-macro"))
-        (eval-lambda-constructor raw-args #t)]
-
-       ;; Special Form: let
-       [(and sf-name (string=? sf-name "let"))
-        (eval-let raw-args #f)]
-
-       ;; Special Form: letn
-       [(and sf-name (string=? sf-name "letn"))
-        (eval-let raw-args #t)]
-
-       ;; Special Form: letex
-       [(and sf-name (string=? sf-name "letex"))
-        (eval-letex raw-args)]
-
-       ;; Special Form: expand
-       [(and sf-name (string=? sf-name "expand"))
-        (eval-expand raw-args)]
-
-       ;; Special Form: while
-       [(and sf-name (string=? sf-name "while"))
-        (eval-while raw-args)]
-
-       ;; Special Form: until
-       [(and sf-name (string=? sf-name "until"))
-        (eval-until raw-args)]
-
-       ;; Special Form: do-while
-       [(and sf-name (string=? sf-name "do-while"))
-        (eval-do-while raw-args)]
-
-       ;; Special Form: do-until
-       [(and sf-name (string=? sf-name "do-until"))
-        (eval-do-until raw-args)]
-
-       ;; Special Form: dotimes
-       [(and sf-name (string=? sf-name "dotimes"))
-        (eval-dotimes raw-args)]
-
-       ;; Special Form: dolist
-       [(and sf-name (string=? sf-name "dolist"))
-        (eval-dolist raw-args)]
-
-       ;; Special Form: dostring
-       [(and sf-name (string=? sf-name "dostring"))
-        (eval-dostring raw-args)]
-
-       ;; Special Form: dotree
-       [(and sf-name (string=? sf-name "dotree"))
-        (eval-dotree raw-args)]
-
-       ;; Special Form: for
-       [(and sf-name (string=? sf-name "for"))
-        (eval-for raw-args)]
-
-       ;; Special Form: catch
-       [(and sf-name (string=? sf-name "catch"))
-        (eval-catch raw-args)]
-
-       ;; Special Form: throw
-       [(and sf-name (string=? sf-name "throw"))
-        (define val (if (pair? raw-args) (nl-eval (car raw-args)) nl-nil))
-        (abort-current-continuation nl-catch-prompt-tag (nl-throw-exn val))]
-
-       ;; Special Form: begin
-       [(and sf-name (string=? sf-name "begin"))
-        (eval-body raw-args)]
-
-       ;; Special Form: silent
-       [(and sf-name (string=? sf-name "silent"))
-        (eval-body raw-args)
-        nl-nil]
-
-       ;; Special Form: and
-       [(and sf-name (string=? sf-name "and"))
-        (eval-and raw-args)]
-
-       ;; Special Form: or
-       [(and sf-name (string=? sf-name "or"))
-        (eval-or raw-args)]
-
-       ;; Special Form: curry
-       [(and sf-name (string=? sf-name "curry"))
-        (eval-curry raw-args)]
-
-       ;; Special Form: : (FOOP Colon Operator)
-       [(and sf-name (string=? sf-name ":"))
-        (eval-foop-colon raw-args)]
-
-       ;; Special Form: bind
-       [(and sf-name (string=? sf-name "bind"))
-        (eval-bind raw-args)]
-
-       ;; Special Form: constant
-       [(and sf-name (string=? sf-name "constant"))
-        (eval-constant raw-args)]
-
-       ;; Special Form: def-new
-       [(and sf-name (string=? sf-name "def-new"))
-        (eval-def-new raw-args)]
-
-       ;; Special Form: default
-       [(and sf-name (string=? sf-name "default"))
-        (eval-default raw-args)]
-
-       ;; Special Form: doargs
-       [(and sf-name (string=? sf-name "doargs"))
-        (eval-doargs raw-args)]
-
-       ;; Special Form: collect
-       [(and sf-name (string=? sf-name "collect"))
-        (eval-collect raw-args)]
-
-       ;; Special Form: local
-       [(and sf-name (string=? sf-name "local"))
-        (eval-local raw-args)]
-
-       ;; Special Form: global
-       [(and sf-name (string=? sf-name "global"))
-        (eval-global raw-args)]
-
-       ;; Otherwise, evaluate the functor!
-       [else
-        (define functor (nl-eval raw-functor))
-        (apply-functor functor raw-args)])]
-
-    [else expr]))
+(define (eval-body body [ctx #f])
+  (when ctx (current-context ctx))
+  (define handler (nl-eval-body-handler))
+  (if handler
+      (handler body (or ctx (current-context)))
+      (error 'eval "eval-body handler not initialized; transpile module required")))
 
 ;; -------------------------------------------------------------------
-;; Functor Application Engine
-;; -------------------------------------------------------------------
-
-(define (apply-functor functor raw-args)
-  (cond
-    ;; 1. Primitive procedure
-    [(nl-primitive? functor)
-     (if (nl-primitive-is-special? functor)
-         ;; Special primitive: receives unevaluated args
-         ((nl-primitive-proc functor) nl-eval raw-args (current-context))
-         ;; Standard primitive: evaluates args first
-         (let ([evaluated-args (map nl-eval raw-args)])
-           ((nl-primitive-proc functor) nl-eval evaluated-args (current-context))))]
-
-    ;; 2. Lambda function (evaluates arguments, dynamically binds parameters)
-    [(and (nl-lambda? functor) (not (nl-lambda-is-macro? functor)))
-     (define evaluated-args (map nl-eval raw-args))
-     (if (nl-lambda-compiled-proc functor)
-         (apply (nl-lambda-compiled-proc functor) evaluated-args)
-         (apply-lambda functor evaluated-args))]
-
-    ;; 3. Lambda-macro / Fexpr (unevaluated arguments passed directly)
-    [(and (nl-lambda? functor) (nl-lambda-is-macro? functor))
-     (apply-lambda functor raw-args)]
-
-    ;; 4. Context Functor (Default functor or Tree dictionary)
-    [(nl-context? functor)
-     (apply-context-functor functor raw-args)]
-
-    ;; 5. List (Implicit Indexing: (lst i ...))
-    [(pair? functor)
-     (define evaluated-indices (map nl-eval raw-args))
-     (nl-index-list functor evaluated-indices)]
-
-    ;; 6. Array (Implicit Indexing: (arr i ...))
-    [(nl-array? functor)
-     (define evaluated-indices (map nl-eval raw-args))
-     (if (null? evaluated-indices)
-         functor
-         (if (pair? (car evaluated-indices))
-             ;; Index vector passed as a single list: (arr '(i j))
-             (nl-array-ref functor (car evaluated-indices))
-             (nl-array-ref functor evaluated-indices)))]
-
-    ;; 7. String (Implicit Indexing: ("str" i))
-    [(string? functor)
-     (define evaluated-args (map nl-eval raw-args))
-     (nl-index-string functor evaluated-args)]
-
-    ;; 8. Integer (Implicit Rest / Slice: (1 lst) or (2 3 lst))
-    [(exact-integer? functor)
-     (apply-implicit-slice functor raw-args)]
-
-    [else
-     (error 'eval "invalid function or functor: ~a" (nl->string functor))]))
-
-(define (apply-evaluated functor actual-args)
-  (cond
-    [(nl-primitive? functor)
-     ((nl-primitive-proc functor) nl-eval actual-args (current-context))]
-    [(nl-lambda? functor)
-     (if (nl-lambda-compiled-proc functor)
-         (apply (nl-lambda-compiled-proc functor) actual-args)
-         (apply-lambda functor actual-args))]
-    [(nl-context? functor)
-     (apply-context-functor functor (map (lambda (a) (list 'quote a)) actual-args))]
-    [(pair? functor)
-     (nl-index-list functor actual-args)]
-    [(nl-array? functor)
-     (if (null? actual-args)
-         functor
-         (if (pair? (car actual-args))
-             (nl-array-ref functor (car actual-args))
-             (nl-array-ref functor actual-args)))]
-    [(string? functor)
-     (nl-index-string functor actual-args)]
-    [(exact-integer? functor)
-     (apply-implicit-slice functor (map (lambda (a) (list 'quote a)) actual-args))]
-    [else
-     (error 'eval "invalid function: ~a" (nl->string functor))]))
-
-;; -------------------------------------------------------------------
-;; Lambda Application
-;; -------------------------------------------------------------------
-
-(define (apply-lambda lam actual-args)
-  (define params (nl-lambda-params lam))
-  (define body (nl-lambda-body lam))
-  ;; Match parameters with actual arguments
-  (define-values (bindings unbound)
-    (bind-parameters params actual-args))
-  (parameterize ([current-call-args unbound]
-                 [current-context (get-or-create-context (nl-lambda-ctx-name lam))])
-    (with-dynamic-bindings bindings
-      (lambda ()
-        (eval-body body)))))
-
-(define (bind-parameters params actual-args)
-  (let loop ([ps params] [as actual-args] [bindings '()])
-    (cond
-      [(null? ps)
-       (values (reverse bindings) as)]
-      [(nl-symbol? (car ps))
-       (define p-sym (car ps))
-       (if (pair? as)
-           (loop (cdr ps) (cdr as) (cons (cons p-sym (car as)) bindings))
-           ;; Argument missing: default to nil
-           (loop (cdr ps) '() (cons (cons p-sym nl-nil) bindings)))]
-      [(pair? (car ps))
-       ;; Parameter with default expression: (param default-exp)
-       (define p-pair (car ps))
-       (define p-sym (car p-pair))
-       (define p-default (cadr p-pair))
-       (if (pair? as)
-           (loop (cdr ps) (cdr as) (cons (cons p-sym (car as)) bindings))
-           (let ([def-val (nl-eval p-default)])
-             (loop (cdr ps) '() (cons (cons p-sym def-val) bindings))))]
-      [else
-       (error 'eval "invalid parameter in lambda: ~a" (car ps))])))
-
-(define (eval-body body)
-  (if (null? body)
-      nl-nil
-      (let loop ([exprs body])
-        (if (null? (cdr exprs))
-            (nl-eval (car exprs))
-            (begin
-              (nl-eval (car exprs))
-              (loop (cdr exprs)))))))
-
-;; -------------------------------------------------------------------
-;; Context Functor Application
+;; Context Default Functors & Tree Dictionaries
 ;; -------------------------------------------------------------------
 
 (define (get-context-default-functor ctx)
@@ -500,31 +169,30 @@
             (nl-symbol-value sym)
             nl-nil))))
 
-(define (apply-context-functor ctx raw-args)
+(define (make-tree-key-str k)
+  (string-append "_" (if (string? k) k (~a k))))
+
+(define (clean-tree-key k)
+  (if (string-prefix? k "_")
+      (substring k 1)
+      k))
+
+(define (apply-context-functor-evaluated ctx evaluated-args)
   (define def-functor (get-context-default-functor ctx))
   (cond
-    ;; If default functor is defined and not nil, call it!
     [(and def-functor (not (nl-nil? def-functor)))
      (parameterize ([current-context ctx])
-       (apply-functor def-functor raw-args))]
-
-    ;; If default functor is nil or undefined: acts as Hash / Tree Dictionary
+       (apply-evaluated def-functor evaluated-args))]
     [else
-     (define evaluated-args (map nl-eval raw-args))
      (case (length evaluated-args)
-       ;; 0 args: returns alist of all key-value pairs
        [(0)
         (for/list ([(k sym) (in-hash (nl-context-symbols ctx))]
                    #:when (not (nl-nil? (nl-symbol-value sym))))
           (list (clean-tree-key k) (nl-symbol-value sym)))]
-
-       ;; 1 arg: retrieve value for key
        [(1)
         (define key-str (make-tree-key-str (car evaluated-args)))
         (define sym (hash-ref (nl-context-symbols ctx) key-str #f))
         (if sym (nl-symbol-value sym) nl-nil)]
-
-       ;; 2 args: set value for key (if nil, delete key)
        [(2)
         (define key-str (make-tree-key-str (car evaluated-args)))
         (define val (cadr evaluated-args))
@@ -540,23 +208,14 @@
        [else
         (error 'eval "too many arguments for dictionary context ~a" (nl-context-name ctx))])]))
 
-(define (make-tree-key-str k)
-  (string-append "_" (if (string? k) k (~a k))))
-
-(define (clean-tree-key k)
-  (if (string-prefix? k "_")
-      (substring k 1)
-      k))
-
 ;; -------------------------------------------------------------------
-;; Implicit Indexing & Slicing
+;; List & String Slicing / Indexing Helpers
 ;; -------------------------------------------------------------------
 
 (define (nl-index-list lst indices)
   (if (null? indices)
       lst
       (if (and (= (length indices) 1) (pair? (car indices)))
-          ;; Index vector: (lst '(3 1))
           (nl-index-list-vector lst (car indices))
           (nl-index-list-vector lst indices))))
 
@@ -584,16 +243,13 @@
          nl-nil
          (string (string-ref str norm-idx)))]
     [(= (length args) 2)
-     ;; (slice str offset length)
      (nl-slice-string str (car args) (cadr args))]
     [else
      (error 'eval "invalid string indexing: ~a" args)]))
 
-(define (apply-implicit-slice offset-int raw-args)
-  (define evaluated-args (map nl-eval raw-args))
+(define (apply-implicit-slice-evaluated offset-int evaluated-args)
   (cond
     [(= (length evaluated-args) 1)
-     ;; Offset only: (1 lst) -> rest of lst
      (define target (car evaluated-args))
      (cond
        [(list? target) (nl-slice-list target offset-int (- (length target) (max 0 offset-int)))]
@@ -602,9 +258,7 @@
         (make-nl-array (list (length (nl-array->list target)))
                        (nl-slice-list (nl-array->list target) offset-int (- (length (nl-array->list target)) (max 0 offset-int))))]
        [else (error 'eval "invalid target for implicit rest/slice: ~a" target)])]
-
     [(= (length evaluated-args) 2)
-     ;; Offset and target, where second arg is length: (offset len target)
      (define len-int (car evaluated-args))
      (define target (cadr evaluated-args))
      (cond
@@ -614,9 +268,8 @@
         (define lst (nl-array->list target))
         (make-nl-array (list (length lst)) (nl-slice-list lst offset-int len-int))]
        [else (error 'eval "invalid target for implicit slice: ~a" target)])]
-
     [else
-     (error 'eval "invalid arguments for implicit slice: ~a" raw-args)]))
+     (error 'eval "invalid arguments for implicit slice: ~a" evaluated-args)]))
 
 (define (nl-slice-list lst offset [len #f])
   (define n (length lst))
@@ -643,99 +296,46 @@
   (substring str start (+ start count)))
 
 ;; -------------------------------------------------------------------
-;; FOOP Colon Operator: (: method-name target-obj args...)
+;; Evaluated Functor Application (used by apply, map, filter, etc.)
 ;; -------------------------------------------------------------------
 
-(define (eval-foop-colon args)
-  (when (< (length args) 2)
-    (error 'eval "syntax error in colon operator: (: method obj ...); got ~a" args))
-  (define method-expr (car args))
-  (define target-expr (cadr args))
-  (define method-args (cddr args))
-
-  (define method-name
-    (cond
-      [(nl-symbol? method-expr) (nl-symbol-name method-expr)]
-      [(string? method-expr) method-expr]
-      [else (error 'eval "invalid method name in colon operator: ~a" method-expr)]))
-
-  ;; Evaluate target object
-  (define target-obj (nl-eval target-expr))
-  (unless (and (pair? target-obj) (or (nl-symbol? (car target-obj)) (nl-context? (car target-obj))))
-    (error 'eval "invalid FOOP object: ~a" target-obj))
-
-  (define class-name
-    (if (nl-symbol? (car target-obj))
-        (nl-symbol-name (car target-obj))
-        (nl-context-name (car target-obj))))
-
-  (define class-ctx (get-or-create-context class-name))
-  (define method-sym
-    (hash-ref (nl-context-symbols class-ctx) method-name
-              (lambda ()
-                ;; Check MAIN context fallback
-                (hash-ref (nl-context-symbols main-context)
-                          (string-append class-name ":" method-name)
-                          (lambda ()
-                            (error 'eval "method ~a not found in class ~a" method-name class-name))))))
-
-  (define method-func (nl-symbol-value method-sym))
-  (unless (or (nl-lambda? method-func) (nl-primitive? method-func))
-    (error 'eval "method ~a in ~a is not callable: ~a" method-name class-name method-func))
-
-  ;; Place update support for mutable FOOP objects:
-  ;; If target was a symbol (e.g. aCircle), we can write back changes to it!
-  (define mut-obj target-obj)
-  (define (update-target-place! new-val)
-    (set! mut-obj new-val)
-    (when (nl-symbol? target-expr)
-      (set-symbol-val! target-expr new-val)))
-
-  (define prev-self-target (current-self-target))
-  (define prev-self-updater (current-self-updater))
-  (current-self-target mut-obj)
-  (current-self-updater update-target-place!)
-  (define evaluated-method-args (map nl-eval method-args))
-  (define res
-    (if (nl-lambda? method-func)
-        (apply-lambda method-func evaluated-method-args)
-        ((nl-primitive-proc method-func) nl-eval evaluated-method-args (current-context))))
-  (update-target-place! (current-self-target))
-  (current-self-target prev-self-target)
-  (current-self-updater prev-self-updater)
-  res)
+(define (apply-evaluated functor actual-args)
+  (cond
+    [(nl-primitive? functor)
+     ((nl-primitive-proc functor) nl-eval actual-args (current-context))]
+    [(nl-lambda? functor)
+     (define proc
+       (or (nl-lambda-compiled-proc functor)
+           (let ([compiler (nl-compile-lambda-handler)])
+             (if compiler
+                 (let ([p (compiler (nl-lambda-params functor)
+                                    (nl-lambda-body functor)
+                                    (get-or-create-context (nl-lambda-ctx-name functor))
+                                    (nl-lambda-is-macro? functor))])
+                   (set-nl-lambda-compiled-proc! functor p)
+                   p)
+                 (error 'eval "cannot call uncompiled lambda without compiler")))))
+     (apply proc actual-args)]
+    [(nl-context? functor)
+     (apply-context-functor-evaluated functor actual-args)]
+    [(pair? functor)
+     (nl-index-list functor actual-args)]
+    [(nl-array? functor)
+     (if (null? actual-args)
+         functor
+         (if (pair? (car actual-args))
+             (nl-array-ref functor (car actual-args))
+             (nl-array-ref functor actual-args)))]
+    [(string? functor)
+     (nl-index-string functor actual-args)]
+    [(exact-integer? functor)
+     (apply-implicit-slice-evaluated functor actual-args)]
+    [else
+     (error 'eval "invalid function: ~a" (nl->string functor))]))
 
 ;; -------------------------------------------------------------------
 ;; Place Mutation Engine: set, setq, setf
 ;; -------------------------------------------------------------------
-
-(define (eval-set-forms sf-name args)
-  (cond
-    [(string=? sf-name "set")
-     ;; (set 'sym val ['sym2 val2 ...])
-     ;; In `set`, the place expression is evaluated to a symbol!
-     (let loop ([pairs args] [last-val nl-nil])
-       (if (null? pairs)
-           last-val
-           (let* ([sym-expr (car pairs)]
-                  [val-expr (if (pair? (cdr pairs)) (cadr pairs) nl-nil)]
-                  [sym (nl-eval sym-expr)]
-                  [val (nl-eval val-expr)])
-             (unless (nl-symbol? sym)
-               (error 'set "expected a symbol, got ~a" sym))
-             (set-symbol-val! sym val)
-             (loop (cddr pairs) val))))]
-
-    [else
-     ;; `setq` / `setf`: place is NOT evaluated if a symbol!
-     (let loop ([pairs args] [last-val nl-nil])
-       (if (null? pairs)
-           last-val
-           (let* ([place-expr (car pairs)]
-                  [val-expr (if (pair? (cdr pairs)) (cadr pairs) nl-nil)]
-                  [val (nl-eval val-expr)])
-             (mutate-place! place-expr val)
-             (loop (cddr pairs) val))))]))
 
 (define (mutate-place! place-expr val)
   (cond
@@ -883,87 +483,8 @@
                  (substring str (+ norm-idx 1))))
 
 ;; -------------------------------------------------------------------
-;; Special Forms Implementation
+;; Runtime Support for Metaprogramming & Dynamic Forms
 ;; -------------------------------------------------------------------
-
-(define (eval-if args)
-  (cond
-    [(null? args) nl-nil]
-    ;; Standard 2 or 3 argument if: (if cond then [else])
-    [(<= (length args) 3)
-     (define cond-val (nl-eval (car args)))
-     (set-symbol-val! sym-it cond-val)
-     (if (nl-truthy? cond-val)
-         (if (pair? (cdr args)) (nl-eval (cadr args)) cond-val)
-         (if (and (pair? (cdr args)) (pair? (cddr args)))
-             (nl-eval (caddr args))
-             nl-nil))]
-    ;; Multi-branch if: (if c1 e1 c2 e2 ... [default])
-    [else
-     (let loop ([rem args])
-       (cond
-         [(null? rem) nl-nil]
-         [(= (length rem) 1)
-          ;; Single remaining expression is default
-          (nl-eval (car rem))]
-         [else
-          (define cond-val (nl-eval (car rem)))
-          (set-symbol-val! sym-it cond-val)
-          (if (nl-truthy? cond-val)
-              (nl-eval (cadr rem))
-              (loop (cddr rem)))]))]))
-
-(define (eval-if-not args)
-  (cond
-    [(null? args) nl-nil]
-    [(<= (length args) 3)
-     (define cond-val (nl-eval (car args)))
-     (set-symbol-val! sym-it cond-val)
-     (if (not (nl-truthy? cond-val))
-         (if (pair? (cdr args)) (nl-eval (cadr args)) cond-val)
-         (if (and (pair? (cdr args)) (pair? (cddr args)))
-             (nl-eval (caddr args))
-             nl-nil))]
-    [else
-     (let loop ([rem args])
-       (cond
-         [(null? rem) nl-nil]
-         [(= (length rem) 1)
-          (nl-eval (car rem))]
-         [else
-          (define cond-val (nl-eval (car rem)))
-          (set-symbol-val! sym-it cond-val)
-          (if (not (nl-truthy? cond-val))
-              (nl-eval (cadr rem))
-              (loop (cddr rem)))]))]))
-
-(define (eval-cond args)
-  (let loop ([clauses args])
-    (if (null? clauses)
-        nl-nil
-        (let* ([clause (car clauses)]
-               [cond-expr (car clause)]
-               [body (cdr clause)]
-               [cond-val (nl-eval cond-expr)])
-          (set-symbol-val! sym-it cond-val)
-          (if (nl-truthy? cond-val)
-              (if (null? body) cond-val (eval-body body))
-              (loop (cdr clauses)))))))
-
-(define (eval-case args)
-  (if (null? args)
-      nl-nil
-      (let* ([switch-val (nl-eval (car args))]
-             [clauses (cdr args)])
-        (let loop ([cls clauses])
-          (if (null? cls)
-              nl-nil
-              (let* ([clause (car cls)]
-                     [key (car clause)]
-                     [body (cdr clause)])
-                (if (equal? switch-val key)
-                    (eval-body body)
-                    (loop (cdr cls)))))))))
 
 (define (eval-define args is-macro?)
   (if (null? args)
@@ -971,247 +492,22 @@
       (let ([head (car args)]
             [body (cdr args)])
         (cond
-          ;; (define (name param1 ...) body...)
           [(pair? head)
            (define name-sym (car head))
            (define params (cdr head))
+           (define home-ctx (get-or-create-context (nl-symbol-context-name name-sym)))
            (define lam (nl-lambda params body is-macro? (nl-symbol-context-name name-sym)))
+           (define compiler (nl-compile-lambda-handler))
+           (when compiler
+             (set-nl-lambda-compiled-proc! lam (compiler params body home-ctx is-macro?)))
            (set-symbol-val! name-sym lam)
            lam]
-          ;; (define name [exp])
           [(nl-symbol? head)
            (define val (if (pair? body) (nl-eval (car body)) nl-nil))
            (set-symbol-val! head val)
            val]
           [else
            (error 'define "invalid syntax for define: ~a" head)]))))
-
-(define (eval-macro-def args)
-  ;; macro defines an expansion macro: (macro (name params...) body...)
-  (eval-define args #t))
-
-(define (eval-lambda-constructor args is-macro?)
-  (if (null? args)
-      (nl-lambda '() '() is-macro? (nl-context-name (current-context)))
-      (nl-lambda (car args) (cdr args) is-macro? (nl-context-name (current-context)))))
-
-(define (eval-let args is-sequential?)
-  (when (null? args)
-    (error 'let "missing bindings in let"))
-  (define raw-bindings (car args))
-  (define body (cdr args))
-  (define pairs
-    (cond
-      [(null? raw-bindings) '()]
-      ;; Nested: ((x 1) (y 2))
-      [(pair? (car raw-bindings))
-       (map (lambda (b)
-              (if (pair? (cdr b))
-                  (cons (car b) (cadr b))
-                  (cons (car b) nl-nil)))
-            raw-bindings)]
-      ;; Flat: (x 1 y 2)
-      [else
-       (let flat-loop ([lst raw-bindings])
-         (cond
-           [(null? lst) '()]
-           [(null? (cdr lst)) (list (cons (car lst) nl-nil))]
-           [else (cons (cons (car lst) (cadr lst))
-                       (flat-loop (cddr lst)))]))]))
-
-  (if is-sequential?
-      ;; letn: evaluate and bind sequentially
-      (let seq-loop ([rem-pairs pairs] [saved-bindings '()])
-        (if (null? rem-pairs)
-            (eval-body body)
-            (let* ([sym (caar rem-pairs)]
-                   [val-expr (cdar rem-pairs)]
-                   [val (nl-eval val-expr)])
-              (with-dynamic-bindings (list (cons sym val))
-                (lambda ()
-                  (seq-loop (cdr rem-pairs) saved-bindings))))))
-      ;; let: evaluate all initializers first
-      (let ([evaluated-pairs
-             (for/list ([p pairs])
-               (cons (car p) (nl-eval (cdr p))))])
-        (with-dynamic-bindings evaluated-pairs
-          (lambda ()
-            (eval-body body))))))
-
-(define (eval-letex args)
-  (when (null? args)
-    (error 'letex "missing bindings in letex"))
-  (define raw-bindings (car args))
-  (define body (cdr args))
-  (define pairs
-    (cond
-      [(null? raw-bindings) '()]
-      [(pair? (car raw-bindings))
-       (for/list ([b raw-bindings])
-         (cons (car b) (if (pair? (cdr b)) (nl-eval (cadr b)) nl-nil)))]
-      [else
-       (let loop ([lst raw-bindings])
-         (cond
-           [(null? lst) '()]
-           [(null? (cdr lst)) (list (cons (car lst) nl-nil))]
-           [else (cons (cons (car lst) (nl-eval (cadr lst)))
-                       (loop (cddr lst)))]))]))
-  ;; Expand variables into body
-  (define expanded-body
-    (for/list ([expr body])
-      (substitute-symbols expr pairs)))
-  (eval-body expanded-body))
-
-(define (substitute-symbols expr pairs)
-  (cond
-    [(nl-symbol? expr)
-     (define p (assoc expr pairs))
-     (if p (cdr p) expr)]
-    [(pair? expr)
-     (cons (substitute-symbols (car expr) pairs)
-           (substitute-symbols (cdr expr) pairs))]
-    [else expr]))
-
-(define (eval-expand args)
-  (when (null? args)
-    (error 'expand "expected at least 1 argument"))
-  (define expr (car args))
-  (if (null? (cdr args))
-      ;; (expand expr): expand uppercase variables bound to non-nil
-      (expand-uppercase expr)
-      (let ([second (cadr args)])
-        (if (and (list? second) (pair? second) (pair? (car second)))
-            ;; (expand list alist [bool])
-            (let* ([alist (cadr args)]
-                   [eval-vals? (and (pair? (cddr args)) (nl-truthy? (nl-eval (caddr args))))]
-                   [pairs (map (lambda (p)
-                                 (cons (car p) (if eval-vals? (nl-eval (cadr p)) (cadr p))))
-                               alist)])
-              (substitute-symbols expr pairs))
-            ;; (expand exp sym-1 sym-2 ...)
-            (let ([syms (cdr args)])
-              (define pairs
-                (for/list ([s syms])
-                  (cons s (nl-symbol-value s))))
-              (substitute-symbols expr pairs))))))
-
-(define (expand-uppercase expr)
-  (cond
-    [(nl-symbol? expr)
-     (define name (nl-symbol-name expr))
-     (if (and (> (string-length name) 0)
-              (char-upper-case? (string-ref name 0))
-              (not (nl-nil? (nl-symbol-value expr))))
-         (nl-symbol-value expr)
-         expr)]
-    [(pair? expr)
-     (cons (expand-uppercase (car expr))
-           (expand-uppercase (cdr expr)))]
-    [else expr]))
-
-(define (eval-while args)
-  (define cond-expr (car args))
-  (define body (cdr args))
-  (let loop ([idx 0] [last-res nl-nil])
-    (define cond-val (nl-eval cond-expr))
-    (set-symbol-val! sym-it cond-val)
-    (if (nl-truthy? cond-val)
-        (begin
-          (set-symbol-val! sym-idx idx)
-          (let ([res (eval-body body)])
-            (loop (+ idx 1) res)))
-        last-res)))
-
-(define (eval-until args)
-  (define cond-expr (car args))
-  (define body (cdr args))
-  (let loop ([idx 0] [last-res nl-nil])
-    (define cond-val (nl-eval cond-expr))
-    (set-symbol-val! sym-it cond-val)
-    (if (not (nl-truthy? cond-val))
-        (begin
-          (set-symbol-val! sym-idx idx)
-          (let ([res (eval-body body)])
-            (loop (+ idx 1) res)))
-        last-res)))
-
-(define (eval-do-while args)
-  (define cond-expr (car args))
-  (define body (cdr args))
-  (let loop ([idx 0])
-    (set-symbol-val! sym-idx idx)
-    (define res (eval-body body))
-    (define cond-val (nl-eval cond-expr))
-    (set-symbol-val! sym-it cond-val)
-    (if (nl-truthy? cond-val)
-        (loop (+ idx 1))
-        res)))
-
-(define (eval-do-until args)
-  (define cond-expr (car args))
-  (define body (cdr args))
-  (let loop ([idx 0])
-    (set-symbol-val! sym-idx idx)
-    (define res (eval-body body))
-    (define cond-val (nl-eval cond-expr))
-    (set-symbol-val! sym-it cond-val)
-    (if (not (nl-truthy? cond-val))
-        (loop (+ idx 1))
-        res)))
-
-(define (eval-dotimes args)
-  (define spec (car args))
-  (define body (cdr args))
-  (define sym (car spec))
-  (define count (nl-eval (cadr spec)))
-  (define break-expr (if (pair? (cddr spec)) (caddr spec) #f))
-  (let loop ([i 0] [last-res nl-nil])
-    (if (>= i count)
-        last-res
-        (with-dynamic-bindings (list (cons sym i))
-          (lambda ()
-            (if (and break-expr (nl-truthy? (nl-eval break-expr)))
-                (nl-eval break-expr)
-                (let ([res (eval-body body)])
-                  (loop (+ i 1) res))))))))
-
-(define (eval-dolist args)
-  (define spec (car args))
-  (define body (cdr args))
-  (define sym (car spec))
-  (define target (nl-eval (cadr spec)))
-  (define break-expr (if (pair? (cddr spec)) (caddr spec) #f))
-  (define items
-    (cond
-      [(list? target) target]
-      [(nl-array? target) (nl-array->list target)]
-      [else '()]))
-  (let loop ([rem items] [idx 0] [last-res nl-nil])
-    (if (null? rem)
-        last-res
-        (with-dynamic-bindings (list (cons sym (car rem)) (cons sym-idx idx))
-          (lambda ()
-            (if (and break-expr (nl-truthy? (nl-eval break-expr)))
-                (nl-eval break-expr)
-                (let ([res (eval-body body)])
-                  (loop (cdr rem) (+ idx 1) res))))))))
-
-(define (eval-dostring args)
-  (define spec (car args))
-  (define body (cdr args))
-  (define sym (car spec))
-  (define str (nl-eval (cadr spec)))
-  (define break-expr (if (pair? (cddr spec)) (caddr spec) #f))
-  (define chars (string->list (if (string? str) str (~a str))))
-  (let loop ([rem chars] [idx 0] [last-res nl-nil])
-    (if (null? rem)
-        last-res
-        (with-dynamic-bindings (list (cons sym (string (car rem))) (cons sym-idx idx))
-          (lambda ()
-            (if (and break-expr (nl-truthy? (nl-eval break-expr)))
-                (nl-eval break-expr)
-                (let ([res (eval-body body)])
-                  (loop (cdr rem) (+ idx 1) res))))))))
 
 (define (eval-dotree args)
   (define spec (car args))
@@ -1230,30 +526,6 @@
           (lambda ()
             (let ([res (eval-body body)])
               (loop (cdr rem) res)))))))
-
-(define (eval-for args)
-  (define spec (car args))
-  (define body (cdr args))
-  (define sym (car spec))
-  (define from (nl-eval (cadr spec)))
-  (define to (nl-eval (caddr spec)))
-  (define step (if (pair? (cdddr spec))
-                   (nl-eval (cadddr spec))
-                   (if (> to from) 1 -1)))
-  (define break-expr (if (and (pair? (cdddr spec)) (pair? (cddddr spec)))
-                         (car (cddddr spec))
-                         #f))
-  (define (continue? cur)
-    (if (> step 0) (<= cur to) (>= cur to)))
-  (let loop ([cur from] [last-res nl-nil])
-    (if (not (continue? cur))
-        last-res
-        (with-dynamic-bindings (list (cons sym cur))
-          (lambda ()
-            (if (and break-expr (nl-truthy? (nl-eval break-expr)))
-                (nl-eval break-expr)
-                (let ([res (eval-body body)])
-                  (loop (+ cur step) res))))))))
 
 (define (eval-catch args)
   (define expr (car args))
@@ -1287,29 +559,18 @@
            nl-true)
          val))))
 
-(define (eval-and args)
-  (let loop ([exprs args] [last-res nl-true])
-    (if (null? exprs)
-        last-res
-        (let ([res (nl-eval (car exprs))])
-          (if (nl-truthy? res)
-              (loop (cdr exprs) res)
-              nl-nil)))))
-
-(define (eval-or args)
-  (let loop ([exprs args])
-    (if (null? exprs)
-        nl-nil
-        (let ([res (nl-eval (car exprs))])
-          (if (nl-truthy? res)
-              res
-              (loop (cdr exprs)))))))
-
 (define (eval-curry args)
   (define func-expr (car args))
   (define first-arg-expr (cadr args))
   (define sym-x (find-or-create-symbol "$x" main-context))
-  (nl-lambda (list sym-x) (list (list func-expr first-arg-expr sym-x)) #f (nl-context-name (current-context))))
+  (define params (list sym-x))
+  (define body (list (list func-expr first-arg-expr sym-x)))
+  (define cur-ctx (current-context))
+  (define lam (nl-lambda params body #f (nl-context-name cur-ctx)))
+  (define compiler (nl-compile-lambda-handler))
+  (when compiler
+    (set-nl-lambda-compiled-proc! lam (compiler params body cur-ctx #f)))
+  lam)
 
 (define (eval-bind args)
   (when (null? args) (error 'bind "expected at least 1 argument"))

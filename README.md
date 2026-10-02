@@ -8,9 +8,9 @@ This project implements the semantics of newLISP v10.7+—including dynamic scop
 
 ## Key Features
 
-- **Dual Execution Modes**:
-  - **Dynamic Tree-Walking Interpreter** (`nl-eval.rkt`): Faithfully replicates newLISP dynamic scoping, environments, and macro expansion.
-  - **Optimizing Transpiler** (`nl-transpile.rkt`): Translates newLISP AST to optimized Racket forms, achieving **20x to 120x speedups** on iterative and recursive code.
+- **Optimizing Transpiler & JIT Compilation**:
+  - Translates newLISP AST directly to native Racket syntax and bytecode (`nl-transpile.rkt`), featuring zero-overhead dynamic scoping, unboxed fast math, and cached inline method dispatch.
+  - High-fidelity runtime environment and dynamic scope manager (`nl-eval.rkt`) governing contexts, symbols, place mutations, and runtime reflection.
 - **Racket `#lang` Integration**:
   - Native `#lang` reader (`newlisp/lang/reader.rkt`) enables writing standalone newLISP source files directly runnable in the Racket ecosystem.
 - **Full newLISP Semantics**:
@@ -226,8 +226,8 @@ newlisp-in-racket/
 ├── main.rkt                   # CLI driver & entry point (-e, REPL, script execution)
 ├── nl-types.rkt               # Core data types, symbols, contexts, and environment
 ├── nl-reader.rkt              # Tokenizer and reader (strings, numbers, symbols, lists)
-├── nl-eval.rkt                # Tree-walking interpreter & dynamic scope manager
-├── nl-transpile.rkt           # Optimizing transpiler to native Racket syntax
+├── nl-eval.rkt                # Runtime environment, context registry & dynamic scope manager
+├── nl-transpile.rkt           # Optimizing transpiler & compiler to native Racket bytecode
 ├── nl-builtins.rkt            # Core built-in primitives and control flow
 ├── nl-ext.rkt                 # Extended utility functions
 ├── nl-macros.rkt              # Built-in macros & syntax transformers
@@ -241,8 +241,8 @@ newlisp-in-racket/
 │   └── lang/
 │       └── reader.rkt         # `#lang newlisp` reader module for Racket integration
 ├── tests/
-│   ├── test-all.rkt           # Unit test suite for interpreter (96 tests)
-│   ├── test-compiled.rkt      # Unit test suite for transpiler (96 tests)
+│   ├── test-all.rkt           # Unit test suite via runtime eval-body (96 tests)
+│   ├── test-compiled.rkt      # Unit test suite via direct transpiler (96 tests)
 │   └── test-cli.rkt           # CLI, option flags, and subprocess test suite (30 tests)
 ├── benchmarks/
 │   └── bench-compare.rkt      # Benchmark against original newLISP (C binary vs Racket)
@@ -277,10 +277,10 @@ racket benchmarks/bench-compare.rkt
 The test suite covers arithmetic, string handling, dynamic scoping, FOOP dispatch, place mutation, networking, HTTP requests, binary packing, matrices, and command-line interfaces.
 
 ```bash
-# Run interpreter test suite (96 tests)
+# Run test suite via runtime eval-body (96 tests)
 racket tests/test-all.rkt
 
-# Run transpiled / compiled test suite (96 tests)
+# Run test suite via direct transpiler (96 tests)
 racket tests/test-compiled.rkt
 
 # Run CLI and flags test suite (30 tests)

@@ -171,22 +171,19 @@
 
     ;; push (place must be unevaluated for mutation)
     [(and op-name (string=? op-name "push"))
-     #`(nl-eval (list (find-or-create-symbol "push" main-context)
-                      #,(transpile-expr (car args) ctx)
-                      '#,(cadr args)
-                      #,@(if (pair? (cddr args)) (list (transpile-expr (caddr args) ctx)) '())))]
+     #`(nl-push! #,(transpile-expr (car args) ctx)
+                 '#,(cadr args)
+                 #,@(if (pair? (cddr args)) (list (transpile-expr (caddr args) ctx)) '()))]
 
     ;; pop (place must be unevaluated)
     [(and op-name (string=? op-name "pop"))
-     #`(nl-eval (list (find-or-create-symbol "pop" main-context)
-                      '#,(car args)
-                      #,@(if (pair? (cdr args)) (list (transpile-expr (cadr args) ctx)) '())))]
+     #`(nl-pop! '#,(car args)
+                #,@(if (pair? (cdr args)) (list (transpile-expr (cadr args) ctx)) '()))]
 
     ;; swap (places must be unevaluated)
     [(and op-name (string=? op-name "swap"))
-     #`(nl-eval (list (find-or-create-symbol "swap" main-context)
-                      '#,(car args)
-                      '#,(cadr args)))]
+     #`(nl-swap! '#,(car args)
+                 '#,(cadr args))]
 
     ;; ++
     [(and op-name (string=? op-name "++"))
@@ -564,7 +561,8 @@
      #`(nl-self-inc-dec! '#,op #,idx-expr #,@(if delta (list delta) '()))]
 
     [else
-     #`(nl-eval (list (find-or-create-symbol (~a '#,op) main-context) '#,place #,@(if delta (list delta) '())))]))
+     (define fast-fn (case op [(++) #'nl-++] [(--) #'nl---] [(inc) #'nl-inc] [(dec) #'nl-dec]))
+     #`(mutate-place! '#,place (#,fast-fn (eval-place '#,place) #,@(if delta (list delta) '())))]))
 
 (define (transpile-define args ctx is-macro?)
   (if (null? args)
@@ -868,3 +866,14 @@
     (nl-read-all code-str (lambda (s) (find-or-create-symbol s ctx))))
   (define proc (compile-nl-body exprs ctx))
   (proc))
+
+(define (compile-lambda-proc-runtime params body target-ctx is-macro?)
+  (eval (compile (compile-lambda-proc params body target-ctx is-macro?)) nl-namespace))
+
+;; Initialize nl-eval, eval-body, and lambda compilation handlers
+(nl-eval-handler eval-compiled)
+(nl-eval-body-handler
+ (lambda (exprs [ctx (current-context)])
+   ((compile-nl-body exprs ctx))))
+(nl-compile-lambda-handler compile-lambda-proc-runtime)
+

@@ -112,9 +112,7 @@
           (nl-read-all input-str
                        (lambda (s) (find-or-create-symbol s (current-context)))))
         (for ([expr exprs])
-          (define res
-            (with-handlers ([exn:fail? (lambda (e) (nl-eval expr))])
-              (eval-compiled expr)))
+          (define res (eval-compiled expr))
           (define res-str (nl->string res #t))
           (displayln res-str out)
           (flush-output out)
