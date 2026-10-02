@@ -120,6 +120,10 @@
             (log-write log-file (format "[~a] OUT: ~a\n" (date->string (current-date) #t) res-str))))
         (continue-k))))
 
+(define (safe-read-line in)
+  (with-handlers ([exn:fail? (lambda (e) eof)])
+    (read-line in 'any)))
+
 (define (run-repl #:prompt? [prompt? #t]
                   #:banner? [banner? #t]
                   #:in [in (current-input-port)]
@@ -140,7 +144,7 @@
             "> "))
       (display p-str out)
       (flush-output out))
-    (define first-line (read-line in 'any))
+    (define first-line (safe-read-line in))
     (cond
       [(eof-object? first-line)
        (when prompt? (newline out))
@@ -155,7 +159,7 @@
          [(string=? trimmed "[cmd]")
           (define full-input
             (let accum ([lines '()])
-              (define l (read-line in 'any))
+              (define l (safe-read-line in))
               (cond
                 [(or (eof-object? l) (string=? (string-trim l) "[/cmd]"))
                  (string-join (reverse lines) "\n")]
@@ -179,7 +183,7 @@
             (let accum ([buf first-line])
               (if (parens-balanced? buf)
                   buf
-                  (let ([next-line (read-line in 'any)])
+                  (let ([next-line (safe-read-line in)])
                     (if (eof-object? next-line)
                         buf
                         (accum (string-append buf "\n" next-line)))))))

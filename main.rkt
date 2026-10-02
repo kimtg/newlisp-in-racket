@@ -6,7 +6,7 @@
          (all-from-out "nl-cli.rkt"))
 
 (define (main)
-  (run-cli))
+  (void (run-cli)))
 
 (module+ main
   (main))

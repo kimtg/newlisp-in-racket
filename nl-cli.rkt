@@ -431,8 +431,27 @@
         (define prog-name (path->string (find-system-path 'run-file)))
         (define main-args-list (cons prog-name raw-argv))
         (set-symbol-val! sym-dollar-main-args main-args-list)
+        (set-symbol-val! sym-args raw-argv)
         (setup-environment)
-        (eval-smart embedded-code))
+        (eval-smart embedded-code)
+        ;; If script did not call (exit), remain in interactive REPL like original newLISP
+        (define force-prompt? (and (member "-C" raw-argv) #t))
+        (define no-prompt? (and (member "-c" raw-argv) #t))
+        (define is-term? (terminal-port? (current-input-port)))
+        (define prompt? (or force-prompt? (and (not no-prompt?) is-term?)))
+        (define banner? (or force-prompt? (and (not no-prompt?) is-term?)))
+        (define log-file
+          (let ([idx-l (or (index-of raw-argv "-l") (index-of raw-argv "-L"))])
+            (if (and idx-l (< (+ idx-l 1) (length raw-argv)))
+                (list-ref raw-argv (+ idx-l 1))
+                #f)))
+        (define log-all? (and (member "-L" raw-argv) #t))
+        (run-repl #:prompt? prompt?
+                  #:banner? banner?
+                  #:log-file log-file
+                  #:log-all? log-all?
+                  #:exit-on-close? #t)
+        (void))
 
       ;; Normal CLI processing
       (process-normal-cli raw-argv)))
