@@ -508,6 +508,31 @@
     [else
      (error 'eval "cannot apply value as function: ~a" functor)]))
 
+;; Global method cache: class-ctx -> hasheq(clean-sym -> (cons method-func (cons func-val compiled-proc)))
+(define *foop-method-cache* (make-hasheq))
+
+(define (clear-foop-method-cache! [ctx #f])
+  (if ctx
+      (hash-remove! *foop-method-cache* ctx)
+      (hash-clear! *foop-method-cache*)))
+
+(define (get-cached-method-proc class-ctx clean-name clean-sym)
+  (define class-cache
+    (hash-ref! *foop-method-cache* class-ctx (lambda () (make-hasheq))))
+  (define entry (hash-ref class-cache clean-sym #f))
+  (if (and entry
+           (let ([sym (car entry)])
+             (and sym (eq? (nl-symbol-value sym) (cadr entry)))))
+      (cddr entry)
+      (let* ([method-func (hash-ref (nl-context-symbols class-ctx) clean-name #f)])
+        (unless method-func
+          (error 'eval "method ~a not found in class ~a" clean-name (nl-context-name class-ctx)))
+        (define func-val (nl-symbol-value method-func))
+        (define proc
+          (and (nl-lambda? func-val) (nl-lambda-compiled-proc func-val)))
+        (hash-set! class-cache clean-sym (cons method-func (cons func-val proc)))
+        proc)))
+
 ;; FOOP dispatch
 (define (nl-foop-dispatch method-sym target-sym-or-expr target-obj args)
   (unless (and (pair? target-obj) (or (nl-symbol? (car target-obj)) (nl-context? (car target-obj))))
@@ -517,13 +542,17 @@
     (if (nl-context? class-head)
         class-head
         (get-or-create-context (nl-symbol-name class-head))))
-  (define clean-name (if (string? method-sym) method-sym (let ([s (~a method-sym)]) (if (string-prefix? s ":") (substring s 1) s))))
-  (define method-func (hash-ref (nl-context-symbols class-ctx) clean-name #f))
-  (unless method-func
-    (error 'eval "method ~a not found in class ~a" clean-name (nl-context-name class-ctx)))
-  (define func-val (nl-symbol-value method-func))
-  (define mut-obj target-obj)
+
+  (define clean-name
+    (if (string? method-sym)
+        method-sym
+        (let ([s (~a method-sym)]) (if (string-prefix? s ":") (substring s 1) s))))
+  (define clean-sym (string->symbol clean-name))
+
+  (define compiled-proc (get-cached-method-proc class-ctx clean-name clean-sym))
+
   (define is-sym? (nl-symbol? target-sym-or-expr))
+  (define mut-obj target-obj)
   (define (update-target-place! new-val)
     (set! mut-obj new-val)
     (when is-sym?
@@ -531,22 +560,31 @@
 
   (define prev-target (current-self-target))
   (define prev-updater (current-self-updater))
-  (define prev-ctx (current-context))
 
   (current-self-target mut-obj)
   (current-self-updater update-target-place!)
-  (current-context class-ctx)
 
   (define res
-    (if (and (nl-lambda? func-val) (nl-lambda-compiled-proc func-val))
-        (apply (nl-lambda-compiled-proc func-val) args)
-        (nl-fast-call func-val args)))
+    (if compiled-proc
+        (if (list? args)
+            (case (length args)
+              [(0) (compiled-proc)]
+              [(1) (compiled-proc (car args))]
+              [(2) (compiled-proc (car args) (cadr args))]
+              [else (apply compiled-proc args)])
+            (compiled-proc args))
+        (let* ([method-func (hash-ref (nl-context-symbols class-ctx) clean-name #f)]
+               [func-val (nl-symbol-value method-func)]
+               [prev-ctx (current-context)])
+          (current-context class-ctx)
+          (define r (nl-fast-call func-val args))
+          (current-context prev-ctx)
+          r)))
 
   (update-target-place! (current-self-target))
 
   (current-self-target prev-target)
   (current-self-updater prev-updater)
-  (current-context prev-ctx)
   res)
 
 ;; Dynamic scoping binder for lambdas
@@ -580,16 +618,40 @@
 
 (define (nl-self-ref . idxs)
   (define cur (current-self-target))
-  (if (null? idxs)
-      cur
-      (nl-index-list cur idxs)))
+  (cond
+    [(null? idxs) cur]
+    [(and (pair? idxs) (null? (cdr idxs)) (exact-integer? (car idxs)) (pair? cur))
+     (define idx (car idxs))
+     (cond
+       [(= idx 1) (if (pair? (cdr cur)) (cadr cur) (error 'self "index out of bounds: 1"))]
+       [(= idx 0) (car cur)]
+       [(and (> idx 1) (< idx (length cur))) (list-ref cur idx)]
+       [else
+        (define len (length cur))
+        (define norm-idx (if (< idx 0) (+ len idx) idx))
+        (when (or (< norm-idx 0) (>= norm-idx len))
+          (error 'self "index out of bounds: ~a" idx))
+        (list-ref cur norm-idx)])]
+    [else (nl-index-list cur idxs)]))
 
 (define (nl-self-inc-dec! op idx [delta #f])
   (define cur-target (current-self-target))
-  (unless (list? cur-target)
+  (unless (pair? cur-target)
     (error 'self "current FOOP target is not a list: ~a" cur-target))
-  (define norm-idx (if (< idx 0) (+ (length cur-target) idx) idx))
-  (define old-val (list-ref cur-target norm-idx))
+  (define old-val
+    (cond
+      [(and (exact-integer? idx) (= idx 1) (pair? (cdr cur-target)))
+       (cadr cur-target)]
+      [(and (exact-integer? idx) (= idx 0))
+       (car cur-target)]
+      [(and (exact-integer? idx) (> idx 1) (< idx (length cur-target)))
+       (list-ref cur-target idx)]
+      [else
+       (define len (length cur-target))
+       (define norm-idx (if (< idx 0) (+ len idx) idx))
+       (when (or (< norm-idx 0) (>= norm-idx len))
+         (error 'self "index out of bounds: ~a" idx))
+       (list-ref cur-target norm-idx)]))
   (define new-val
     (case op
       [(++)
@@ -608,14 +670,40 @@
        (define d (if delta (exact->inexact delta) 1.0))
        (define base (if (number? old-val) (exact->inexact old-val) 0.0))
        (- base d)]))
-  (define new-target (list-set-path cur-target (list norm-idx) new-val))
+  (define new-target
+    (cond
+      [(and (exact-integer? idx) (= idx 1) (pair? (cdr cur-target)))
+       (cons (car cur-target) (cons new-val (cddr cur-target)))]
+      [(and (exact-integer? idx) (= idx 0))
+       (cons new-val (cdr cur-target))]
+      [(and (exact-integer? idx) (>= idx 0) (< idx (length cur-target)))
+       (list-set cur-target idx new-val)]
+      [else
+       (define len (length cur-target))
+       (define norm-idx (if (< idx 0) (+ len idx) idx))
+       (list-set cur-target norm-idx new-val)]))
   (current-self-target new-target)
   ((current-self-updater) new-target)
   new-val)
 
 (define (nl-self-setf! idx val)
   (define cur-target (current-self-target))
-  (define new-target (list-set-path cur-target (if (list? idx) idx (list idx)) val))
+  (unless (pair? cur-target)
+    (error 'self "current FOOP target is not a list: ~a" cur-target))
+  (define new-target
+    (cond
+      [(and (exact-integer? idx) (= idx 1) (pair? (cdr cur-target)))
+       (cons (car cur-target) (cons val (cddr cur-target)))]
+      [(and (exact-integer? idx) (= idx 0))
+       (cons val (cdr cur-target))]
+      [(and (exact-integer? idx) (>= idx 0) (< idx (length cur-target)))
+       (list-set cur-target idx val)]
+      [(exact-integer? idx)
+       (define len (length cur-target))
+       (define norm-idx (if (< idx 0) (+ len idx) idx))
+       (list-set cur-target norm-idx val)]
+      [else
+       (list-set-path cur-target (if (list? idx) idx (list idx)) val)]))
   (current-self-target new-target)
   ((current-self-updater) new-target)
   val)

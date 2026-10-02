@@ -101,9 +101,19 @@
 ;; Current call unbound args parameter
 (define current-call-args (make-parameter '()))
 
-;; Current FOOP target and place
-(define current-self-target (make-parameter nl-nil))
-(define current-self-updater (make-parameter void))
+;; Current FOOP target and place (fast thread-cell backed accessors)
+(define *self-target-cell* (make-thread-cell nl-nil #t))
+(define *self-updater-cell* (make-thread-cell void #t))
+
+(define current-self-target
+  (case-lambda
+    [() (thread-cell-ref *self-target-cell*)]
+    [(val) (thread-cell-set! *self-target-cell* val)]))
+
+(define current-self-updater
+  (case-lambda
+    [() (thread-cell-ref *self-updater-cell*)]
+    [(fn) (thread-cell-set! *self-updater-cell* fn)]))
 
 ;; Prompt tag for throw/catch
 (define nl-catch-prompt-tag (make-continuation-prompt-tag 'nl-catch))
@@ -681,15 +691,19 @@
     (when (nl-symbol? target-expr)
       (set-symbol-val! target-expr new-val)))
 
-  (parameterize ([current-self-target mut-obj]
-                 [current-self-updater update-target-place!])
-    (define evaluated-method-args (map nl-eval method-args))
-    (define res
-      (if (nl-lambda? method-func)
-          (apply-lambda method-func evaluated-method-args)
-          ((nl-primitive-proc method-func) nl-eval evaluated-method-args (current-context))))
-    (update-target-place! (current-self-target))
-    res))
+  (define prev-self-target (current-self-target))
+  (define prev-self-updater (current-self-updater))
+  (current-self-target mut-obj)
+  (current-self-updater update-target-place!)
+  (define evaluated-method-args (map nl-eval method-args))
+  (define res
+    (if (nl-lambda? method-func)
+        (apply-lambda method-func evaluated-method-args)
+        ((nl-primitive-proc method-func) nl-eval evaluated-method-args (current-context))))
+  (update-target-place! (current-self-target))
+  (current-self-target prev-self-target)
+  (current-self-updater prev-self-updater)
+  res)
 
 ;; -------------------------------------------------------------------
 ;; Place Mutation Engine: set, setq, setf
@@ -850,12 +864,15 @@
              [norm-idx (if (< idx 0) (+ len idx) idx)])
         (when (or (< norm-idx 0) (>= norm-idx len))
           (error 'setf "index out of bounds: ~a" idx))
-        (for/list ([elem lst] [i (in-naturals)])
-          (if (= i norm-idx)
-              (if (null? (cdr indices))
-                  val
-                  (list-set-path elem (cdr indices) val))
-              elem)))))
+        (if (null? (cdr indices))
+            (cond
+              [(= norm-idx 0) (cons val (cdr lst))]
+              [(and (= norm-idx 1) (pair? (cdr lst))) (cons (car lst) (cons val (cddr lst)))]
+              [else (list-set lst norm-idx val)])
+            (for/list ([elem lst] [i (in-naturals)])
+              (if (= i norm-idx)
+                  (list-set-path elem (cdr indices) val)
+                  elem))))))
 
 (define (string-set-index str idx val-str)
   (define len (string-length str))

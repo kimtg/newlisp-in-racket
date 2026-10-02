@@ -645,23 +645,31 @@
     [(= (length params) 1)
      (define p0 (car param-syms))
      (define def0 (car param-defaults))
-     #`(lambda raw-args
-         (define a0 (if (pair? raw-args) (car raw-args) #,def0))
-         (define rest (if (and (pair? raw-args) (pair? (cdr raw-args))) (cdr raw-args) '()))
-         (define saved-p0 (nl-symbol-value #,p0))
-         (define saved-args (if (null? rest) #f (current-call-args)))
-         (set-nl-symbol-value! #,p0 a0)
-         (if (null? rest)
-             (dynamic-wind
-               void
-               (lambda () #,transpiled-body)
-               (lambda () (set-nl-symbol-value! #,p0 saved-p0)))
-             (dynamic-wind
-               (lambda () (current-call-args rest))
-               (lambda () #,transpiled-body)
-               (lambda ()
-                 (set-nl-symbol-value! #,p0 saved-p0)
-                 (current-call-args saved-args)))))]
+     #`(case-lambda
+         [(a0)
+          (define saved-p0 (nl-symbol-value #,p0))
+          (set-nl-symbol-value! #,p0 a0)
+          (dynamic-wind
+            void
+            (lambda () #,transpiled-body)
+            (lambda () (set-nl-symbol-value! #,p0 saved-p0)))]
+         [raw-args
+          (define a0 (if (pair? raw-args) (car raw-args) #,def0))
+          (define rest (if (and (pair? raw-args) (pair? (cdr raw-args))) (cdr raw-args) '()))
+          (define saved-p0 (nl-symbol-value #,p0))
+          (define saved-args (if (null? rest) #f (current-call-args)))
+          (set-nl-symbol-value! #,p0 a0)
+          (if (null? rest)
+              (dynamic-wind
+                void
+                (lambda () #,transpiled-body)
+                (lambda () (set-nl-symbol-value! #,p0 saved-p0)))
+              (dynamic-wind
+                (lambda () (current-call-args rest))
+                (lambda () #,transpiled-body)
+                (lambda ()
+                  (set-nl-symbol-value! #,p0 saved-p0)
+                  (current-call-args saved-args))))])]
 
     ;; Zero-allocation fast-path for 2 parameters
     [(= (length params) 2)
@@ -669,29 +677,41 @@
      (define p1 (cadr param-syms))
      (define def0 (car param-defaults))
      (define def1 (cadr param-defaults))
-     #`(lambda raw-args
-         (define a0 (if (pair? raw-args) (car raw-args) #,def0))
-         (define a1 (if (and (pair? raw-args) (pair? (cdr raw-args))) (cadr raw-args) #,def1))
-         (define rest (if (and (pair? raw-args) (pair? (cdr raw-args)) (pair? (cddr raw-args))) (cddr raw-args) '()))
-         (define saved-p0 (nl-symbol-value #,p0))
-         (define saved-p1 (nl-symbol-value #,p1))
-         (define saved-args (if (null? rest) #f (current-call-args)))
-         (set-nl-symbol-value! #,p0 a0)
-         (set-nl-symbol-value! #,p1 a1)
-         (if (null? rest)
-             (dynamic-wind
-               void
-               (lambda () #,transpiled-body)
-               (lambda ()
-                 (set-nl-symbol-value! #,p0 saved-p0)
-                 (set-nl-symbol-value! #,p1 saved-p1)))
-             (dynamic-wind
-               (lambda () (current-call-args rest))
-               (lambda () #,transpiled-body)
-               (lambda ()
-                 (set-nl-symbol-value! #,p0 saved-p0)
-                 (set-nl-symbol-value! #,p1 saved-p1)
-                 (current-call-args saved-args)))))]
+     #`(case-lambda
+         [(a0 a1)
+          (define saved-p0 (nl-symbol-value #,p0))
+          (define saved-p1 (nl-symbol-value #,p1))
+          (set-nl-symbol-value! #,p0 a0)
+          (set-nl-symbol-value! #,p1 a1)
+          (dynamic-wind
+            void
+            (lambda () #,transpiled-body)
+            (lambda ()
+              (set-nl-symbol-value! #,p0 saved-p0)
+              (set-nl-symbol-value! #,p1 saved-p1)))]
+         [raw-args
+          (define a0 (if (pair? raw-args) (car raw-args) #,def0))
+          (define a1 (if (and (pair? raw-args) (pair? (cdr raw-args))) (cadr raw-args) #,def1))
+          (define rest (if (and (pair? raw-args) (pair? (cdr raw-args)) (pair? (cddr raw-args))) (cddr raw-args) '()))
+          (define saved-p0 (nl-symbol-value #,p0))
+          (define saved-p1 (nl-symbol-value #,p1))
+          (define saved-args (if (null? rest) #f (current-call-args)))
+          (set-nl-symbol-value! #,p0 a0)
+          (set-nl-symbol-value! #,p1 a1)
+          (if (null? rest)
+              (dynamic-wind
+                void
+                (lambda () #,transpiled-body)
+                (lambda ()
+                  (set-nl-symbol-value! #,p0 saved-p0)
+                  (set-nl-symbol-value! #,p1 saved-p1)))
+              (dynamic-wind
+                (lambda () (current-call-args rest))
+                (lambda () #,transpiled-body)
+                (lambda ()
+                  (set-nl-symbol-value! #,p0 saved-p0)
+                  (set-nl-symbol-value! #,p1 saved-p1)
+                  (current-call-args saved-args))))])]
 
     ;; General N parameters
     [else
@@ -790,16 +810,14 @@
         (values op (car args) (cdr args))))
   (define method-str (if (nl-symbol? method-sym) (nl-symbol-name method-sym) (~a method-sym)))
   (define clean-name (if (string-prefix? method-str ":") (substring method-str 1) method-str))
-  (if (nl-symbol? target-expr)
-      (let ([var-sym (resolve-symbol-in-context target-expr ctx)])
-        #`(nl-foop-dispatch '#,clean-name
-                            #,var-sym
-                            (nl-symbol-value #,var-sym)
-                            (list #,@(for/list ([a rest-args]) (transpile-expr a ctx)))))
-      #`(nl-foop-dispatch '#,clean-name
-                          '#,target-expr
-                          #,(transpile-expr target-expr ctx)
-                          (list #,@(for/list ([a rest-args]) (transpile-expr a ctx))))))
+  (define is-sym? (nl-symbol? target-expr))
+  (define var-sym (if is-sym? (resolve-symbol-in-context target-expr ctx) #f))
+  (define target-stx (if is-sym? #`(nl-symbol-value #,var-sym) (transpile-expr target-expr ctx)))
+  (define sym-stx (if is-sym? var-sym #`'#,target-expr))
+  #`(nl-foop-dispatch '#,clean-name
+                      #,sym-stx
+                      #,target-stx
+                      (list #,@(for/list ([a rest-args]) (transpile-expr a ctx)))))
 
 (define (transpile-general-app op args ctx)
   (if (nl-symbol? op)

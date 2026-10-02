@@ -268,7 +268,7 @@ racket benchmarks/bench-compare.rkt
 | **Recursive Fibonacci** (`fib 30`) | `245.0 ms` | `180.0 ms` | **1.4x faster** |
 | **Tight Loop Mutation** (`dotimes 1,000,000` with `++`) | `27.3 ms` | `6.6 ms` | **4.1x faster** |
 | **List Operations** (`sequence`, `map`, `filter` 100k items) | `26.1 ms` | `20.3 ms` | **1.3x faster** |
-| **FOOP Method Dispatch** (100,000 invocations) | `11.4 ms` | `86.3 ms` | `0.13x relative` |
+| **FOOP Method Dispatch** (100,000 invocations) | `11.4 ms` | `19.8 ms` | `0.60x relative` |
 
 ---
 
