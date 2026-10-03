@@ -45,8 +45,9 @@
   (printf " Benchmark: ~a\n" name)
   (printf "------------------------------------------------------------\n")
 
-  ;; Warm-up / compile
+  ;; Warm-up / compile & JIT compile
   (define compiled-thunk (compile-nl-body (nl-read-all code-str (lambda (s) (find-or-create-symbol s (current-context))))))
+  (compiled-thunk)
 
   ;; 1. Original C newLISP run (if available)
   (define orig-time

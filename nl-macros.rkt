@@ -519,6 +519,17 @@
     [else
      (error 'eval "cannot apply value as function: ~a" functor)]))
 
+(define (resolve-class-ctx class-head)
+  (cond
+    [(nl-context? class-head) class-head]
+    [(nl-symbol? class-head) (get-or-create-context (nl-symbol-name class-head))]
+    [else (get-or-create-context (~a class-head))]))
+
+(define (get-cached-method-proc-sym class-ctx clean-sym)
+  (define cache (nl-context-method-cache class-ctx))
+  (or (hash-ref cache clean-sym #f)
+      (get-cached-method-proc class-ctx (symbol->string clean-sym) clean-sym)))
+
 (define (get-cached-method-proc class-ctx clean-name clean-sym)
   (define cache (nl-context-method-cache class-ctx))
   (or (hash-ref cache clean-sym #f)
@@ -547,91 +558,252 @@
     (current-context prev-ctx)
     r))
 
+;; -------------------------------------------------------------------
+;; High-Performance Inline-Cached (IC) FOOP Dispatchers
+;; -------------------------------------------------------------------
+
+(define (nl-foop-dispatch-sym-ic-0 ic clean-sym target-sym)
+  (define target-obj (nl-symbol-value target-sym))
+  (define class-head (car target-obj))
+  (define proc
+    (if (eq? class-head (mcar ic))
+        (mcdr ic)
+        (let* ([class-ctx (if (nl-context? class-head) class-head (resolve-class-ctx class-head))]
+               [p (get-cached-method-proc-sym class-ctx clean-sym)])
+          (set-mcar! ic class-head)
+          (set-mcdr! ic p)
+          p)))
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
+  (define res
+    (if proc
+        (proc)
+        (invoke-uncompiled-foop (if (nl-context? class-head) class-head (resolve-class-ctx class-head))
+                                (symbol->string clean-sym) '())))
+  (define final-target (get-self-target))
+  (unless (eq? final-target target-obj)
+    (set-nl-symbol-value! target-sym final-target))
+  (set-self-target! prev-target)
+  res)
+
+(define (nl-foop-dispatch-sym-ic-1 ic clean-sym target-sym a0)
+  (define target-obj (nl-symbol-value target-sym))
+  (define class-head (car target-obj))
+  (define proc
+    (if (eq? class-head (mcar ic))
+        (mcdr ic)
+        (let* ([class-ctx (if (nl-context? class-head) class-head (resolve-class-ctx class-head))]
+               [p (get-cached-method-proc-sym class-ctx clean-sym)])
+          (set-mcar! ic class-head)
+          (set-mcdr! ic p)
+          p)))
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
+  (define res
+    (if proc
+        (proc a0)
+        (invoke-uncompiled-foop (if (nl-context? class-head) class-head (resolve-class-ctx class-head))
+                                (symbol->string clean-sym) (list a0))))
+  (define final-target (get-self-target))
+  (unless (eq? final-target target-obj)
+    (set-nl-symbol-value! target-sym final-target))
+  (set-self-target! prev-target)
+  res)
+
+(define (nl-foop-dispatch-sym-ic-2 ic clean-sym target-sym a0 a1)
+  (define target-obj (nl-symbol-value target-sym))
+  (define class-head (car target-obj))
+  (define proc
+    (if (eq? class-head (mcar ic))
+        (mcdr ic)
+        (let* ([class-ctx (if (nl-context? class-head) class-head (resolve-class-ctx class-head))]
+               [p (get-cached-method-proc-sym class-ctx clean-sym)])
+          (set-mcar! ic class-head)
+          (set-mcdr! ic p)
+          p)))
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
+  (define res
+    (if proc
+        (proc a0 a1)
+        (invoke-uncompiled-foop (if (nl-context? class-head) class-head (resolve-class-ctx class-head))
+                                (symbol->string clean-sym) (list a0 a1))))
+  (define final-target (get-self-target))
+  (unless (eq? final-target target-obj)
+    (set-nl-symbol-value! target-sym final-target))
+  (set-self-target! prev-target)
+  res)
+
+(define (nl-foop-dispatch-sym-ic ic clean-sym target-sym args)
+  (define target-obj (nl-symbol-value target-sym))
+  (define class-head (car target-obj))
+  (define proc
+    (if (eq? class-head (mcar ic))
+        (mcdr ic)
+        (let* ([class-ctx (if (nl-context? class-head) class-head (resolve-class-ctx class-head))]
+               [p (get-cached-method-proc-sym class-ctx clean-sym)])
+          (set-mcar! ic class-head)
+          (set-mcdr! ic p)
+          p)))
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
+  (define res
+    (if proc
+        (apply proc args)
+        (invoke-uncompiled-foop (if (nl-context? class-head) class-head (resolve-class-ctx class-head))
+                                (symbol->string clean-sym) args)))
+  (define final-target (get-self-target))
+  (unless (eq? final-target target-obj)
+    (set-nl-symbol-value! target-sym final-target))
+  (set-self-target! prev-target)
+  res)
+
+(define (nl-foop-dispatch-val-ic-0 ic clean-sym target-obj)
+  (define class-head (car target-obj))
+  (define proc
+    (if (eq? class-head (mcar ic))
+        (mcdr ic)
+        (let* ([class-ctx (if (nl-context? class-head) class-head (resolve-class-ctx class-head))]
+               [p (get-cached-method-proc-sym class-ctx clean-sym)])
+          (set-mcar! ic class-head)
+          (set-mcdr! ic p)
+          p)))
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
+  (define res
+    (if proc
+        (proc)
+        (invoke-uncompiled-foop (if (nl-context? class-head) class-head (resolve-class-ctx class-head))
+                                (symbol->string clean-sym) '())))
+  (set-self-target! prev-target)
+  res)
+
+(define (nl-foop-dispatch-val-ic-1 ic clean-sym target-obj a0)
+  (define class-head (car target-obj))
+  (define proc
+    (if (eq? class-head (mcar ic))
+        (mcdr ic)
+        (let* ([class-ctx (if (nl-context? class-head) class-head (resolve-class-ctx class-head))]
+               [p (get-cached-method-proc-sym class-ctx clean-sym)])
+          (set-mcar! ic class-head)
+          (set-mcdr! ic p)
+          p)))
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
+  (define res
+    (if proc
+        (proc a0)
+        (invoke-uncompiled-foop (if (nl-context? class-head) class-head (resolve-class-ctx class-head))
+                                (symbol->string clean-sym) (list a0))))
+  (set-self-target! prev-target)
+  res)
+
+(define (nl-foop-dispatch-val-ic-2 ic clean-sym target-obj a0 a1)
+  (define class-head (car target-obj))
+  (define proc
+    (if (eq? class-head (mcar ic))
+        (mcdr ic)
+        (let* ([class-ctx (if (nl-context? class-head) class-head (resolve-class-ctx class-head))]
+               [p (get-cached-method-proc-sym class-ctx clean-sym)])
+          (set-mcar! ic class-head)
+          (set-mcdr! ic p)
+          p)))
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
+  (define res
+    (if proc
+        (proc a0 a1)
+        (invoke-uncompiled-foop (if (nl-context? class-head) class-head (resolve-class-ctx class-head))
+                                (symbol->string clean-sym) (list a0 a1))))
+  (set-self-target! prev-target)
+  res)
+
+(define (nl-foop-dispatch-val-ic ic clean-sym target-obj args)
+  (define class-head (car target-obj))
+  (define proc
+    (if (eq? class-head (mcar ic))
+        (mcdr ic)
+        (let* ([class-ctx (if (nl-context? class-head) class-head (resolve-class-ctx class-head))]
+               [p (get-cached-method-proc-sym class-ctx clean-sym)])
+          (set-mcar! ic class-head)
+          (set-mcdr! ic p)
+          p)))
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
+  (define res
+    (if proc
+        (apply proc args)
+        (invoke-uncompiled-foop (if (nl-context? class-head) class-head (resolve-class-ctx class-head))
+                                (symbol->string clean-sym) args)))
+  (set-self-target! prev-target)
+  res)
+
+;; Non-IC Dispatchers (Backward compatibility)
 (define (nl-foop-dispatch-0 clean-sym target-sym-or-expr target-obj)
   (define class-head (car target-obj))
-  (define class-ctx
-    (cond
-      [(nl-context? class-head) class-head]
-      [(nl-symbol? class-head) (get-or-create-context (nl-symbol-name class-head))]
-      [else (get-or-create-context (~a class-head))]))
-  (define clean-name (symbol->string clean-sym))
-  (define compiled-proc (get-cached-method-proc class-ctx clean-name clean-sym))
+  (define class-ctx (resolve-class-ctx class-head))
+  (define compiled-proc (get-cached-method-proc-sym class-ctx clean-sym))
   (define is-sym? (nl-symbol? target-sym-or-expr))
-  (define prev-target (current-self-target))
-  (current-self-target target-obj)
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
   (define res
     (if compiled-proc
         (compiled-proc)
-        (invoke-uncompiled-foop class-ctx clean-name '())))
-  (define final-target (current-self-target))
+        (invoke-uncompiled-foop class-ctx (symbol->string clean-sym) '())))
+  (define final-target (get-self-target))
   (when (and is-sym? (not (eq? final-target target-obj)))
     (set-nl-symbol-value! target-sym-or-expr final-target))
-  (current-self-target prev-target)
+  (set-self-target! prev-target)
   res)
 
 (define (nl-foop-dispatch-1 clean-sym target-sym-or-expr target-obj a0)
   (define class-head (car target-obj))
-  (define class-ctx
-    (cond
-      [(nl-context? class-head) class-head]
-      [(nl-symbol? class-head) (get-or-create-context (nl-symbol-name class-head))]
-      [else (get-or-create-context (~a class-head))]))
-  (define clean-name (symbol->string clean-sym))
-  (define compiled-proc (get-cached-method-proc class-ctx clean-name clean-sym))
+  (define class-ctx (resolve-class-ctx class-head))
+  (define compiled-proc (get-cached-method-proc-sym class-ctx clean-sym))
   (define is-sym? (nl-symbol? target-sym-or-expr))
-  (define prev-target (current-self-target))
-  (current-self-target target-obj)
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
   (define res
     (if compiled-proc
         (compiled-proc a0)
-        (invoke-uncompiled-foop class-ctx clean-name (list a0))))
-  (define final-target (current-self-target))
+        (invoke-uncompiled-foop class-ctx (symbol->string clean-sym) (list a0))))
+  (define final-target (get-self-target))
   (when (and is-sym? (not (eq? final-target target-obj)))
     (set-nl-symbol-value! target-sym-or-expr final-target))
-  (current-self-target prev-target)
+  (set-self-target! prev-target)
   res)
 
 (define (nl-foop-dispatch-2 clean-sym target-sym-or-expr target-obj a0 a1)
   (define class-head (car target-obj))
-  (define class-ctx
-    (cond
-      [(nl-context? class-head) class-head]
-      [(nl-symbol? class-head) (get-or-create-context (nl-symbol-name class-head))]
-      [else (get-or-create-context (~a class-head))]))
-  (define clean-name (symbol->string clean-sym))
-  (define compiled-proc (get-cached-method-proc class-ctx clean-name clean-sym))
+  (define class-ctx (resolve-class-ctx class-head))
+  (define compiled-proc (get-cached-method-proc-sym class-ctx clean-sym))
   (define is-sym? (nl-symbol? target-sym-or-expr))
-  (define prev-target (current-self-target))
-  (current-self-target target-obj)
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
   (define res
     (if compiled-proc
         (compiled-proc a0 a1)
-        (invoke-uncompiled-foop class-ctx clean-name (list a0 a1))))
-  (define final-target (current-self-target))
+        (invoke-uncompiled-foop class-ctx (symbol->string clean-sym) (list a0 a1))))
+  (define final-target (get-self-target))
   (when (and is-sym? (not (eq? final-target target-obj)))
     (set-nl-symbol-value! target-sym-or-expr final-target))
-  (current-self-target prev-target)
+  (set-self-target! prev-target)
   res)
 
 ;; FOOP dispatch (general arity fallback)
 (define (nl-foop-dispatch method-sym target-sym-or-expr target-obj args)
   (define class-head (car target-obj))
-  (define class-ctx
-    (cond
-      [(nl-context? class-head) class-head]
-      [(nl-symbol? class-head) (get-or-create-context (nl-symbol-name class-head))]
-      [else (get-or-create-context (~a class-head))]))
-
-  (define clean-name
-    (if (string? method-sym)
+  (define class-ctx (resolve-class-ctx class-head))
+  (define clean-sym
+    (if (symbol? method-sym)
         method-sym
-        (let ([s (~a method-sym)]) (if (string-prefix? s ":") (substring s 1) s))))
-  (define clean-sym (if (symbol? method-sym) method-sym (string->symbol clean-name)))
+        (let ([s (~a method-sym)])
+          (string->symbol (if (string-prefix? s ":") (substring s 1) s)))))
 
-  (define compiled-proc (get-cached-method-proc class-ctx clean-name clean-sym))
+  (define compiled-proc (get-cached-method-proc-sym class-ctx clean-sym))
   (define is-sym? (nl-symbol? target-sym-or-expr))
-  (define prev-target (current-self-target))
-  (current-self-target target-obj)
+  (define prev-target (get-self-target))
+  (set-self-target! target-obj)
   (define res
     (if compiled-proc
         (if (list? args)
@@ -641,11 +813,11 @@
               [(2) (compiled-proc (car args) (cadr args))]
               [else (apply compiled-proc args)])
             (compiled-proc args))
-        (invoke-uncompiled-foop class-ctx clean-name args)))
-  (define final-target (current-self-target))
+        (invoke-uncompiled-foop class-ctx (symbol->string clean-sym) args)))
+  (define final-target (get-self-target))
   (when (and is-sym? (not (eq? final-target target-obj)))
     (set-nl-symbol-value! target-sym-or-expr final-target))
-  (current-self-target prev-target)
+  (set-self-target! prev-target)
   res)
 
 ;; Dynamic scoping binder for lambdas
@@ -678,7 +850,7 @@
 ;; -------------------------------------------------------------------
 
 (define (nl-self-ref . idxs)
-  (define cur (current-self-target))
+  (define cur (get-self-target))
   (cond
     [(null? idxs) cur]
     [(and (pair? idxs) (null? (cdr idxs)) (exact-integer? (car idxs)) (pair? cur))
@@ -696,7 +868,7 @@
     [else (nl-index-list cur idxs)]))
 
 (define (nl-self-inc-dec! op idx [delta #f])
-  (define cur-target (current-self-target))
+  (define cur-target (get-self-target))
   (unless (pair? cur-target)
     (error 'self "current FOOP target is not a list: ~a" cur-target))
   (define old-val
@@ -743,12 +915,11 @@
        (define len (length cur-target))
        (define norm-idx (if (< idx 0) (+ len idx) idx))
        (list-set cur-target norm-idx new-val)]))
-  (current-self-target new-target)
-  ((current-self-updater) new-target)
+  (set-self-target! new-target)
   new-val)
 
 (define (nl-self-setf! idx val)
-  (define cur-target (current-self-target))
+  (define cur-target (get-self-target))
   (unless (pair? cur-target)
     (error 'self "current FOOP target is not a list: ~a" cur-target))
   (define new-target
@@ -765,8 +936,7 @@
        (list-set cur-target norm-idx val)]
       [else
        (list-set-path cur-target (if (list? idx) idx (list idx)) val)]))
-  (current-self-target new-target)
-  ((current-self-updater) new-target)
+  (set-self-target! new-target)
   val)
 
 (define (nl-fast-map fn . lsts)

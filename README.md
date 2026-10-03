@@ -265,10 +265,10 @@ racket benchmarks/bench-compare.rkt
 
 | Benchmark | Original C newLISP (v10.7.1) | Racket Transpiled | Transpiled vs Original newLISP |
 | :--- | :--- | :--- | :--- |
-| **Recursive Fibonacci** (`fib 30`) | `205.0 ms` | `157.0 ms` | **1.3x faster** |
-| **Tight Loop Mutation** (`dotimes 1,000,000` with `++`) | `26.5 ms` | `6.4 ms` | **4.1x faster** |
-| **List Operations** (`sequence`, `map`, `filter` 100k items) | `22.4 ms` | `16.5 ms` | **1.4x faster** |
-| **FOOP Method Dispatch** (100,000 invocations) | `11.0 ms` | `11.2 ms` | **0.98x relative (~matches C)** |
+| **Recursive Fibonacci** (`fib 30`) | `248.1 ms` | `62.6 ms` | **4.0x faster** |
+| **Tight Loop Mutation** (`dotimes 1,000,000` with `++`) | `27.2 ms` | `8.1 ms` | **3.4x faster** |
+| **List Operations** (`sequence`, `map`, `filter` 100k items) | `26.0 ms` | `4.6 ms` | **5.6x faster** |
+| **FOOP Method Dispatch** (100,000 invocations) | `13.3 ms` | `5.0 ms` | **2.7x faster** |
 
 ---
 
